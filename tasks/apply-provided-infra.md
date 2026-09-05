@@ -1,5 +1,6 @@
 ---
 title: "運営提供のインフラを適用する"
+needs-user-action: true
 labels:
   - phase:start
   - type:infrastructure

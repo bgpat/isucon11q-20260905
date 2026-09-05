@@ -1,5 +1,6 @@
 ---
 title: "レギュレーションを確認する"
+needs-user-action: true
 labels:
   - phase:day-before
   - type:task

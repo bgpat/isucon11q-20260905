@@ -1,5 +1,6 @@
 ---
 title: "ローカルの接続設定を用意する"
+needs-user-action: true
 labels:
   - phase:start
   - type:infrastructure

@@ -1,5 +1,6 @@
 ---
 title: "ポータルを確認する"
+needs-user-action: true
 labels:
   - phase:start
   - type:task

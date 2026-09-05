@@ -1,5 +1,6 @@
 ---
 title: "初期状態のベースラインを計測する"
+needs-user-action: true
 labels:
   - phase:early-competition
   - type:performance
