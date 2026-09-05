@@ -29,6 +29,7 @@ depends_on:
 - スコア、エラー、レイテンシ、CPU、メモリ、I/O、DB 指標を保存する。
 - 実行日時と commit を記録する。
 - Issue と Pull Request に結果を記載する。
+- default branch で実行した各ベンチマークについて、実行時の exact commit を target とする GitHub Release を作成する。
 
 ## 実行例
 
@@ -115,6 +116,30 @@ EOF
 )"
 ```
 
+## 6. GitHub Release を作成する
+
+ベンチマークごとに、実行時に取得した default branch の exact commit を target にしてReleaseを作成する。スコアが0点またはfailでもReleaseを省略しない。ベースラインであることを明記し、最終結果として扱わない。
+
+```bash
+TARGET_COMMIT=$(ssh s1 'git -C / rev-parse HEAD')
+TAG="baseline-${STAMP}-score-${SCORE}"
+gh release create "$TAG" \
+  --repo "$REPO" \
+  --target "$TARGET_COMMIT" \
+  --title "baseline ${STAMP} score ${SCORE}" \
+  --notes "$(cat <<EOF
+- 種別: ベースライン
+- 実行日時: ${STAMP}
+- 対象 commit: ${TARGET_COMMIT}
+- 対象サーバー: ${SERVERS[*]}
+- 条件: Issue を参照
+- スコア: ${SCORE}
+- エラー: ${ERRORS}
+- 関連 Issue: #${ISSUE}
+EOF
+)"
+```
+
 # 確認方法
 
 ```bash
@@ -138,3 +163,4 @@ cat "$DIR/meta.txt"
 - commit:
 - スコア:
 - 保存先:
+- GitHub Release URL:

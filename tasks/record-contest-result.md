@@ -10,11 +10,11 @@ depends_on:
 
 # 目的
 
-競技終了後に、最終状態、スコア、変更内容、判断の根拠を GitHub Release として残す。
+default branch で実行したベンチマークごとに、実行時の状態、スコア、変更内容、判断の根拠を GitHub Release として残す。
 
 # 前提条件
 
-- default branch にマージされた commit を正とする。
+- 実行時の default branch の exact commit を正とする。
 - 実測していないスコアや結果を補完しない。
 
 # 対象サーバー
@@ -23,8 +23,9 @@ depends_on:
 
 # 作業
 
-- default branch にマージされた commit を確認する。
+- ベンチマーク実行時の default branch commit を確認する。
 - タイムスタンプとスコアを含む名前で GitHub Release を作成する。
+- ベースライン、比較計測、提出用、成功、失敗を問わず、ベンチマークごとにReleaseを作成する。
 - 変更内容の要約を記載する。
 - 関連 Issue と Pull Request へのリンクを記載する。
 - ベンチマーク結果、既知の問題、未実施の計測を記録する。
@@ -60,7 +61,7 @@ gh release create "$TAG" \
   --notes "$(cat <<EOF
 ## 要約
 
-- 最終スコア: ${SCORE}（実測）
+- スコア: ${SCORE}（実測。ベースラインか最終結果かを明記）
 - 対象 commit: $(git rev-parse "origin/${BRANCH}")
 
 ## 関連
@@ -72,6 +73,8 @@ gh release create "$TAG" \
 
 - 実行日時:
 - 対象サーバー:
+- 実行条件:
+- ベンチマーク種別: ベースライン / 比較計測 / 最終
 - 結果の保存先:
 
 ## 既知の問題 / 未実施の計測
@@ -96,7 +99,7 @@ gh release view "$TAG" --repo "$REPO"
 # 失敗時の復旧
 
 - tag が衝突する: `${STAMP}` を含めた名前で作り直す。
-- スコア未確定: GitHub Release を作らず、確定してから実行する。仮の数値で tag しない。
+- スコア未確定: GitHub Release を作らず、実測結果を取得してから実行する。fail時は実測どおり `fail` または `0` を記録し、仮の数値で tag しない。
 
 # 完了条件
 
