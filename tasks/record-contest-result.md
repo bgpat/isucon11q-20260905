@@ -84,7 +84,7 @@ EOF
 計測ログを付ける場合は、秘密情報を含まないファイルだけを asset にする。
 
 ```bash
-# gh release upload "$TAG" results/YYYYMMDD-HHMMSS-final/score.txt --repo "$REPO"
+# gh release upload "$TAG" /tmp/isucon-results/YYYYMMDD-HHMMSS-final/score.txt --repo "$REPO"
 ```
 
 # 確認方法

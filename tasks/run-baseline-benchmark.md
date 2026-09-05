@@ -36,7 +36,7 @@ depends_on:
 
 ```bash
 STAMP=$(date +%Y%m%d-%H%M%S)
-DIR="results/${STAMP}-baseline"
+DIR="/tmp/isucon-results/${STAMP}-baseline"
 mkdir -p "$DIR"
 SERVERS=(s1 s2 s3)
 ```

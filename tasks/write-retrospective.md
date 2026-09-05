@@ -45,7 +45,7 @@ gh issue list --repo "$REPO" --state all --limit 50
 gh pr list --repo "$REPO" --state all --limit 50
 ```
 
-スコアは Release または `results/` の実測値だけ使う。
+スコアは Release、Issue、Pull Request に記録された実測値だけ使う。手元の一時ファイルだけにある値は、正式記録へ転記して確認できるまで使わない。
 
 ## 2. 公開文を書く
 
@@ -72,12 +72,13 @@ gh pr list --repo "$REPO" --state all --limit 50
 ## 3. 公開 URL を Issue に記録する
 
 ```bash
-gh issue comment "$ISSUE" --body "$(cat <<'EOF'
+mkdir -p /tmp/isucon-results/retrospective
+cat > /tmp/isucon-results/retrospective/comment.md <<'EOF'
 - 公開先 URL:
 - 公開範囲:
 - 使った一次情報（Release / Issue / PR）:
 EOF
-)"
+gh issue comment "$ISSUE" --body-file /tmp/isucon-results/retrospective/comment.md
 ```
 
 # 確認方法

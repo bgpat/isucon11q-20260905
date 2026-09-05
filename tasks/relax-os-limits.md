@@ -36,14 +36,14 @@ Issue に記録した全競技サーバー。
 
 ```bash
 SERVERS=(s1 s2 s3)
-mkdir -p results/os-limits
+mkdir -p /tmp/isucon-results/os-limits
 ```
 
 ## 1. 強制アクセス制御を確認する
 
 ```bash
 for s in "${SERVERS[@]}"; do
-  ssh "$s" 'bash -s' <<'EOF' | tee "results/os-limits/${s}.txt"
+  ssh "$s" 'bash -s' <<'EOF' | tee "/tmp/isucon-results/os-limits/${s}.txt"
 hostname
 echo "### apparmor"
 aa-status 2>/dev/null || apparmor_status 2>/dev/null || echo 'apparmor not found'
@@ -57,7 +57,7 @@ done
 
 ```bash
 for s in "${SERVERS[@]}"; do
-  ssh "$s" 'bash -s' <<'EOF' | tee -a "results/os-limits/${s}.txt"
+  ssh "$s" 'bash -s' <<'EOF' | tee -a "/tmp/isucon-results/os-limits/${s}.txt"
 echo "### iptables"
 iptables -S 2>/dev/null || true
 echo "### nft"
@@ -73,7 +73,7 @@ done
 
 ```bash
 for s in "${SERVERS[@]}"; do
-  ssh "$s" 'bash -s' <<'EOF' | tee -a "results/os-limits/${s}.txt"
+  ssh "$s" 'bash -s' <<'EOF' | tee -a "/tmp/isucon-results/os-limits/${s}.txt"
 echo "### ulimit"
 ulimit -a
 echo "### limits.d"
@@ -107,8 +107,8 @@ done
 # 確認方法
 
 ```bash
-ls results/os-limits
-grep -H 'somaxconn\|LimitNOFILE\|DROP\|REJECT' results/os-limits/* || true
+ls /tmp/isucon-results/os-limits
+grep -H 'somaxconn\|LimitNOFILE\|DROP\|REJECT' /tmp/isucon-results/os-limits/* || true
 ```
 
 # 失敗時の復旧
@@ -128,4 +128,4 @@ ssh s1 'cd / && git checkout -- /etc/ssh/sshd_config /etc/security/limits.conf; 
 
 - 実行日時:
 - 変更した項目 / 残した制限:
-- 保存先: `results/os-limits/`
+- 保存先: `/tmp/isucon-results/os-limits/`

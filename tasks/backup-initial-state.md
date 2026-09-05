@@ -40,7 +40,7 @@ Issue に記録した全競技サーバー。
 ```bash
 SERVERS=(s1 s2 s3)
 STAMP=$(date +%Y%m%d-%H%M%S)
-mkdir -p results/backup
+mkdir -p /tmp/isucon-results/backup
 ```
 
 ## 1. 対象と除外を記録する
@@ -97,9 +97,9 @@ EOF
 
 ```bash
 # サーバー上で表示された OUT パスを使う
-rsync -avP --bwlimit=10000 s1:/tmp/s1-db-*.sql.gz results/backup/
-ls -lh results/backup
-# results/backup は Git 管理しない
+rsync -avP --bwlimit=10000 s1:/tmp/s1-db-*.sql.gz /tmp/isucon-results/backup/
+ls -lh /tmp/isucon-results/backup
+# /tmp/isucon-results/backup は Git 管理しない
 grep -n 'results' .gitignore || true
 ```
 
@@ -109,7 +109,7 @@ Release asset は暗号化保管ではない。秘密情報を含む場合は公
 
 ```bash
 TAG="db-initial-${STAMP}"
-gh release create "$TAG" results/backup/* \
+gh release create "$TAG" /tmp/isucon-results/backup/* \
   --repo dbgofy/isucon11q-20260905 \
   --title "DB初期データバックアップ ${STAMP}" \
   --notes "$(cat <<EOF
@@ -125,22 +125,22 @@ EOF
 # 確認方法
 
 ```bash
-ls -lh results/backup
-gzip -t results/backup/s1-db-*.sql.gz
-zcat results/backup/s1-db-*.sql.gz | head
+ls -lh /tmp/isucon-results/backup
+gzip -t /tmp/isucon-results/backup/s1-db-*.sql.gz
+zcat /tmp/isucon-results/backup/s1-db-*.sql.gz | head
 gh release view "$TAG" --repo dbgofy/isucon11q-20260905
-git status --short results/backup
+git status --short /tmp/isucon-results/backup
 ```
 
 `git status` でバックアップが staged / tracked になっていないこと。
 
-復旧は dump を流し込む。例: `zcat results/backup/s1-db-*.sql.gz | mysql`。認証は実機の既存設定を使う。
+復旧は dump を流し込む。例: `zcat /tmp/isucon-results/backup/s1-db-*.sql.gz | mysql`。認証は実機の既存設定を使う。
 
 # 失敗時の復旧
 
 - ディスク不足: `/tmp` の途中ファイルを消し、対象を絞って再実行する。
 - 取得がアプリに影響する: `ionice` / `rsync --bwlimit` を強めるか、中断して空き時間に再開する。
-- Release 作成失敗: 手元の `results/backup` は残す。公開範囲を確認してから再作成する。
+- Release 作成失敗: 手元の `/tmp/isucon-results/backup` は残す。公開範囲を確認してから再作成する。
 
 # 完了条件
 
