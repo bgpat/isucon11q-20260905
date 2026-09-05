@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -49,7 +50,19 @@ var (
 	jiaJWTSigningKey *ecdsa.PublicKey
 
 	postIsuConditionTargetBaseURL string // JIAへのactivate時に登録する，ISUがconditionを送る先のURL
+	trendCache                    struct {
+		sync.RWMutex
+		response []TrendResponse
+		valid    bool
+	}
 )
+
+func invalidateTrendCache() {
+	trendCache.Lock()
+	trendCache.valid = false
+	trendCache.response = nil
+	trendCache.Unlock()
+}
 
 type Config struct {
 	Name string `db:"name"`
@@ -336,6 +349,7 @@ func postInitialize(c echo.Context) error {
 		c.Logger().Errorf("db error : %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	invalidateTrendCache()
 
 	return c.JSON(http.StatusOK, InitializeResponse{
 		Language: "go",
@@ -657,6 +671,7 @@ func postIsu(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	invalidateTrendCache()
 
 	return c.JSON(http.StatusCreated, isu)
 }
@@ -1083,6 +1098,14 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
+	trendCache.RLock()
+	if trendCache.valid {
+		res := trendCache.response
+		trendCache.RUnlock()
+		return c.JSON(http.StatusOK, res)
+	}
+	trendCache.RUnlock()
+
 	characterList := []Isu{}
 	err := db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
 	if err != nil {
@@ -1141,6 +1164,10 @@ func getTrend(c echo.Context) error {
 			Critical:  critical[character.Character],
 		})
 	}
+	trendCache.Lock()
+	trendCache.response = res
+	trendCache.valid = true
+	trendCache.Unlock()
 
 	return c.JSON(http.StatusOK, res)
 }
@@ -1209,6 +1236,7 @@ func postIsuCondition(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	invalidateTrendCache()
 
 	return c.NoContent(http.StatusAccepted)
 }
