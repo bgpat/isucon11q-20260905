@@ -18,7 +18,7 @@
 
 各タスクの `depends_on` には、先に完了させるタスクのファイル名を記載する。
 依存関係がないタスクは `depends_on: []` とする。
-Issue 化時には `depends_on` を依存先IssueへのGitHub Issue dependency（blocked by）として登録し、本文にも `Depends on #番号` として反映する。
+Issue 化時には `depends_on` を依存先IssueへのGitHub Issue dependency（blocked by）として登録する。
 
 リポジトリ作成時に `on-created` workflow が有効な場合は、`tasks/*.md`（`README.md` を除く）から
 自動的に Issue が作成される。自動作成後に、対象競技やサーバー情報など問題ごとの内容を追記する。
