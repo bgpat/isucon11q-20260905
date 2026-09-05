@@ -37,14 +37,14 @@ Issue に記録した全競技サーバー。
 ```bash
 SERVERS=(s1 s2 s3)
 STAMP=$(date +%Y%m%d-%H%M%S)
-mkdir -p "results/${STAMP}-reboot-final"
+mkdir -p "/tmp/isucon-work/${STAMP}-reboot-final"
 ```
 
 ## 1. 凍結 commit と起動状態、Web ページを記録する
 
 ```bash
 for s in "${SERVERS[@]}"; do
-  ssh "$s" 'bash -s' <<'EOF' | tee "results/${STAMP}-reboot-final/${s}-before.txt"
+  ssh "$s" 'bash -s' <<'EOF' | tee "/tmp/isucon-work/${STAMP}-reboot-final/${s}-before.txt"
 hostname
 git -C / rev-parse HEAD
 git -C / status -sb
@@ -64,15 +64,15 @@ PAGES=(
   /
   # データが見えるページを追加する
 )
-mkdir -p "results/${STAMP}-reboot-final/pages-before"
-: > "results/${STAMP}-reboot-final/pages-before.txt"
+mkdir -p "/tmp/isucon-work/${STAMP}-reboot-final/pages-before"
+: > "/tmp/isucon-work/${STAMP}-reboot-final/pages-before.txt"
 for p in "${PAGES[@]}"; do
   name=$(printf '%s' "$p" | tr '/?' '__')
-  http_code=$(curl -sS -D "results/${STAMP}-reboot-final/pages-before/${name}.headers" \
-    -o "results/${STAMP}-reboot-final/pages-before/${name}.body" \
+  http_code=$(curl -sS -D "/tmp/isucon-work/${STAMP}-reboot-final/pages-before/${name}.headers" \
+    -o "/tmp/isucon-work/${STAMP}-reboot-final/pages-before/${name}.body" \
     -w '%{http_code}' "${APP_URL}${p}")
-  echo "$p ${http_code} $(wc -c < "results/${STAMP}-reboot-final/pages-before/${name}.body")" \
-    | tee -a "results/${STAMP}-reboot-final/pages-before.txt"
+  echo "$p ${http_code} $(wc -c < "/tmp/isucon-work/${STAMP}-reboot-final/pages-before/${name}.body")" \
+    | tee -a "/tmp/isucon-work/${STAMP}-reboot-final/pages-before.txt"
 done
 ```
 
@@ -93,7 +93,7 @@ done
 ```bash
 for s in "${SERVERS[@]}"; do
   until ssh -o ConnectTimeout=5 "$s" 'true'; do sleep 5; done
-  ssh "$s" 'bash -s' <<'EOF' | tee "results/${STAMP}-reboot-final/${s}-after.txt"
+  ssh "$s" 'bash -s' <<'EOF' | tee "/tmp/isucon-work/${STAMP}-reboot-final/${s}-after.txt"
 hostname
 whoami
 git -C / rev-parse HEAD
@@ -117,18 +117,18 @@ done
 
 ```bash
 # pages-before と同じ APP_URL と PAGES
-mkdir -p "results/${STAMP}-reboot-final/pages-after"
-: > "results/${STAMP}-reboot-final/pages-after.txt"
+mkdir -p "/tmp/isucon-work/${STAMP}-reboot-final/pages-after"
+: > "/tmp/isucon-work/${STAMP}-reboot-final/pages-after.txt"
 for p in "${PAGES[@]}"; do
   name=$(printf '%s' "$p" | tr '/?' '__')
-  http_code=$(curl -sS -D "results/${STAMP}-reboot-final/pages-after/${name}.headers" \
-    -o "results/${STAMP}-reboot-final/pages-after/${name}.body" \
+  http_code=$(curl -sS -D "/tmp/isucon-work/${STAMP}-reboot-final/pages-after/${name}.headers" \
+    -o "/tmp/isucon-work/${STAMP}-reboot-final/pages-after/${name}.body" \
     -w '%{http_code}' "${APP_URL}${p}")
-  echo "$p ${http_code} $(wc -c < "results/${STAMP}-reboot-final/pages-after/${name}.body")" \
-    | tee -a "results/${STAMP}-reboot-final/pages-after.txt"
+  echo "$p ${http_code} $(wc -c < "/tmp/isucon-work/${STAMP}-reboot-final/pages-after/${name}.body")" \
+    | tee -a "/tmp/isucon-work/${STAMP}-reboot-final/pages-after.txt"
 done
-diff -u "results/${STAMP}-reboot-final/pages-before.txt" "results/${STAMP}-reboot-final/pages-after.txt" || true
-diff -ru "results/${STAMP}-reboot-final/pages-before" "results/${STAMP}-reboot-final/pages-after" || true
+diff -u "/tmp/isucon-work/${STAMP}-reboot-final/pages-before.txt" "/tmp/isucon-work/${STAMP}-reboot-final/pages-after.txt" || true
+diff -ru "/tmp/isucon-work/${STAMP}-reboot-final/pages-before" "/tmp/isucon-work/${STAMP}-reboot-final/pages-after" || true
 ```
 
 ブラウザで同じページを開き、再起動直前に見えていた内容が残っていることを確認する。
@@ -144,9 +144,9 @@ diff -ru "results/${STAMP}-reboot-final/pages-before" "results/${STAMP}-reboot-f
 # 確認方法
 
 ```bash
-diff -u results/${STAMP}-reboot-final/s1-before.txt results/${STAMP}-reboot-final/s1-after.txt || true
-diff -u results/${STAMP}-reboot-final/pages-before.txt results/${STAMP}-reboot-final/pages-after.txt || true
-diff -ru results/${STAMP}-reboot-final/pages-before results/${STAMP}-reboot-final/pages-after || true
+diff -u /tmp/isucon-work/${STAMP}-reboot-final/s1-before.txt /tmp/isucon-work/${STAMP}-reboot-final/s1-after.txt || true
+diff -u /tmp/isucon-work/${STAMP}-reboot-final/pages-before.txt /tmp/isucon-work/${STAMP}-reboot-final/pages-after.txt || true
+diff -ru /tmp/isucon-work/${STAMP}-reboot-final/pages-before /tmp/isucon-work/${STAMP}-reboot-final/pages-after || true
 ```
 
 再起動後も必要な listen があり、prometheus / grafana が居ないこと。

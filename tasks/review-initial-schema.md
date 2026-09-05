@@ -34,7 +34,7 @@ DB が動いているサーバー。配置は `check-environment.md` の記録�
 コマンドは実行例である。問題や環境によって構成、パス、サービス名、接続方法は異なる。Issue に記録したユーザー提供情報と実機の状態に合わせて読み替える。
 
 ```bash
-mkdir -p results/schema
+mkdir -p /tmp/isucon-work/schema
 DBHOST=s1
 ```
 
@@ -48,8 +48,8 @@ ls -la /home/isucon/webapp 2>/dev/null || true'
 ## 2. データベースとテーブルを一覧する
 
 ```bash
-ssh "$DBHOST" 'mysql -e "SHOW DATABASES;"' | tee results/schema/databases.txt
-ssh "$DBHOST" 'bash -s' <<'EOF' | tee results/schema/tables.txt
+ssh "$DBHOST" 'mysql -e "SHOW DATABASES;"' | tee /tmp/isucon-work/schema/databases.txt
+ssh "$DBHOST" 'bash -s' <<'EOF' | tee /tmp/isucon-work/schema/tables.txt
 mysql -e "SELECT table_schema, table_name, engine, table_rows, data_length, index_length, (data_length+index_length) AS total
 FROM information_schema.tables
 WHERE table_schema NOT IN ('mysql','information_schema','performance_schema','sys')
@@ -60,7 +60,7 @@ EOF
 ## 3. インデックスとキーを一覧する
 
 ```bash
-ssh "$DBHOST" 'bash -s' <<'EOF' | tee results/schema/indexes.txt
+ssh "$DBHOST" 'bash -s' <<'EOF' | tee /tmp/isucon-work/schema/indexes.txt
 mysql -e "SELECT table_schema, table_name, index_name, non_unique, seq_in_index, column_name
 FROM information_schema.statistics
 WHERE table_schema NOT IN ('mysql','information_schema','performance_schema','sys')
@@ -72,7 +72,7 @@ CREATE TABLE が必要なら、確認した DB 名だけ dump する。
 
 ```bash
 # DBNAME は SHOW DATABASES で確認した値
-ssh "$DBHOST" 'mysqldump --no-data "$DBNAME"' > results/schema/schema.sql
+ssh "$DBHOST" 'mysqldump --no-data "$DBNAME"' > /tmp/isucon-work/schema/schema.sql
 ```
 
 ## 4. 事実と仮説を分けて Issue に書く
@@ -82,8 +82,8 @@ gh issue comment "$ISSUE" --body "$(cat <<'EOF'
 ## 事実
 
 - スキーマファイルの場所:
-- 主要テーブルの行数 / サイズ: `results/schema/tables.txt`
-- 既存インデックス: `results/schema/indexes.txt`
+- 主要テーブルの行数 / サイズ: `/tmp/isucon-work/schema/tables.txt`
+- 既存インデックス: `/tmp/isucon-work/schema/indexes.txt`
 
 ## 仮説（このタスクでは変更しない）
 
@@ -95,8 +95,8 @@ EOF
 # 確認方法
 
 ```bash
-ls -l results/schema
-wc -l results/schema/*.txt
+ls -l /tmp/isucon-work/schema
+wc -l /tmp/isucon-work/schema/*.txt
 ```
 
 # 失敗時の復旧
@@ -112,5 +112,5 @@ wc -l results/schema/*.txt
 # 作業後の記録
 
 - 実行日時:
-- 保存先: `results/schema/`
+- 保存先: `/tmp/isucon-work/schema/`
 - DB サーバー:

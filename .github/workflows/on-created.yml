@@ -44,7 +44,7 @@ jobs:
           gh label create "type:database" --color "5319E7" --description "DB・SQL・インデックス" --force
           gh label create "type:security" --color "D93F0B" --description "SSH・権限・秘密情報" --force
           gh label create "type:bug" --color "D73A4A" --description "動作不良・設定不具合" --force
-          gh label create ai --color "7057FF" --description "AI Agent が作成・対応" --force
+          gh label create "needs-user-action" --color "FBCA04" --description "ユーザーの選択・情報・操作が必要" --force
 
       - name: create task parent issue
         id: task-parent
@@ -93,7 +93,13 @@ jobs:
             while IFS= read -r label; do
               labels+=(--label "$label")
             done < <(awk 'BEGIN { in_labels = 0 } /^labels:/ { in_labels = 1; next } in_labels && /^  - / { sub(/^  - /, ""); print; next } in_labels { exit }' "$task")
+            if awk '/^needs-user-action: true$/ { found = 1 } END { exit !found }' "$task"; then
+              labels+=(--label "needs-user-action")
+            fi
             body=$(awk 'BEGIN { section = 0 } /^---$/ { section++; next } section >= 2 { print }' "$task")
+            if awk '/^needs-user-action: true$/ { found = 1 } END { exit !found }' "$task"; then
+              body=$'## ユーザー確認\n\n次のどれで進めますか？\n\n1. 実行する（必要情報を提供する）\n2. 今回は実行しない（未完了のまま保留する）\n3. 手順だけ作成する（実機・外部サービスには触れない）\n\n必要な情報:\n- サーバー名・役割・接続先:\n- 実行対象と範囲:\n- 実行してよい時間帯:\n\n質問への回答があるまで、実機・外部サービスへの操作は行わない。\n\n'$'\n'"$body"
+            fi
             body="$body"$'\n\n<!-- task-template: '"$filename"$' -->'
 
             mapfile -t task_numbers < <(gh issue list --state all --limit 100 --json number,body \
@@ -107,7 +113,7 @@ jobs:
             else
               issue_url=$(gh issue create --title "$title" "${labels[@]}" --parent "$PARENT_NUMBER" --body "$body")
               issue_number=${issue_url##*/}
-              for attempt in 1 2 3 4 5; do
+              for _ in 1 2 3 4 5; do
                 mapfile -t task_numbers < <(gh issue list --state all --limit 100 --json number,body \
                   --jq ".[] | select(.body | contains(\"<!-- task-template: $filename -->\")) | .number")
                 [ "${#task_numbers[@]}" -eq 1 ] && break
@@ -137,5 +143,4 @@ jobs:
                   -F issue_id="$dependency_id" --silent
               fi
             done < <(awk '/^depends_on:/ { in_dep=1; next } in_dep && /^  - / { sub(/^  - /, ""); print; next } in_dep { in_dep=0 }' "$task")
-          done
-          < "$issue_map"
+          done < "$issue_map"

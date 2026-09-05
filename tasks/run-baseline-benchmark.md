@@ -1,5 +1,6 @@
 ---
 title: "初期状態のベースラインを計測する"
+needs-user-action: true
 labels:
   - phase:early-competition
   - type:performance
@@ -35,7 +36,7 @@ depends_on:
 
 ```bash
 STAMP=$(date +%Y%m%d-%H%M%S)
-DIR="results/${STAMP}-baseline"
+DIR="/tmp/isucon-work/${STAMP}-baseline"
 mkdir -p "$DIR"
 SERVERS=(s1 s2 s3)
 ```

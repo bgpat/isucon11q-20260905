@@ -1,5 +1,6 @@
 ---
 title: "競技サーバーを初期化し Git 管理へ登録する"
+needs-user-action: true
 labels:
   - phase:start
   - type:infrastructure
