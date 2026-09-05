@@ -89,7 +89,7 @@ AI Agent に対応を依頼する Issue にも `ai` label を付ける。
 `ai` label は AI Agent の関与を示すもので、担当者や責任者を表すものではない。
 
 共通タスクは「ISUCON 共通タスク」Issue の sub-issue として登録する。
-依存関係は、複数の依存先を持てる GitHub の Issue dependency（blocked by）として登録し、Issue 本文にも `Depends on #番号` を残す。
+依存関係は、複数の依存先を持てる GitHub の Issue dependency（blocked by）として登録する。
 依存関係を表すために、共通タスクの sub-issue の親を変更してはならない。
 
 ## 計測と分析
@@ -169,4 +169,4 @@ Release には変更内容の要約、関連 Issue へのリンク、関連 Pull
 - 完了したタスクも履歴として Git 管理する。
 - 同じ作業を複数回実行する可能性がある場合は、この文書に手順として記載する。`tasks/` には置かない。
 - リポジトリ作成時にIssue化する共通タスクは「ISUCON 共通タスク」Issueのsub-issueとして登録する。
-- 依存関係はGitHubのIssue dependency（blocked by）とIssue本文の`Depends on #番号`で表現する。GitHubのsub-issueは1つの親しか持てないため、依存関係のために親を差し替えない。
+- 依存関係はGitHubのIssue dependency（blocked by）で表現する。GitHubのsub-issueは1つの親しか持てないため、依存関係のために親を差し替えない。
