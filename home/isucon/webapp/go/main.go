@@ -1092,16 +1092,16 @@ func getTrend(c echo.Context) error {
 
 	conditionRows := []TrendConditionRow{}
 	err = db.Select(&conditionRows, `
-		SELECT isu.id, isu.character, condition.timestamp, condition.condition
+		SELECT isu.id, isu.character, latest.timestamp, latest.condition
 		FROM isu
-		JOIN isu_condition AS condition ON condition.id = (
+		JOIN isu_condition AS latest ON latest.id = (
 			SELECT latest_condition.id
 			FROM isu_condition AS latest_condition
 			WHERE latest_condition.jia_isu_uuid = isu.jia_isu_uuid
 			ORDER BY latest_condition.timestamp DESC, latest_condition.id DESC
 			LIMIT 1
 		)
-		ORDER BY isu.character, condition.timestamp DESC, condition.id DESC`)
+		ORDER BY isu.character, latest.timestamp DESC, latest.id DESC`)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
