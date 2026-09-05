@@ -1,0 +1,99 @@
+name: On Created
+
+# boilerplate へ取り込むために保持する。現在のリポジトリでは job を実行しない。
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  on-created:
+    runs-on: ubuntu-latest
+    if: ${{ github.repository != 'bgpat/isucon11q-20260905' && github.repository != 'dbgofy/isucon-boilerplate' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: create issue labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "phase:day-before" --color "1D76DB" --description "前日準備" --force
+          gh label create "phase:just-before" --color "5319E7" --description "競技直前" --force
+          gh label create "phase:start" --color "6F42C1" --description "競技開始直後" --force
+          gh label create "phase:early-competition" --color "E99695" --description "競技序盤" --force
+          gh label create "phase:mid-competition" --color "B60205" --description "競技中盤" --force
+          gh label create "phase:final-check" --color "FBCA04" --description "競技終盤" --force
+          gh label create "phase:after-competition" --color "0E8A16" --description "競技終了後" --force
+          gh label create "type:task" --color "C5DEF5" --description "定型作業・確認" --force
+          gh label create "type:documentation" --color "0075CA" --description "ドキュメント・記録" --force
+          gh label create "type:infrastructure" --color "D4C5F9" --description "OS・ネットワーク・インフラ" --force
+          gh label create "type:backup" --color "BFDADC" --description "バックアップ・復旧" --force
+          gh label create "type:performance" --color "E99695" --description "性能・ベンチマーク" --force
+          gh label create "type:experiment" --color "F9D0C4" --description "仮説検証・比較実験" --force
+          gh label create "type:observability" --color "C2E0C6" --description "ログ・監視・計装" --force
+          gh label create "type:deployment" --color "A2EEEF" --description "デプロイ・同期・起動停止" --force
+          gh label create "type:validation" --color "FEF2C0" --description "検証・再起動試験" --force
+          gh label create "type:application" --color "B60205" --description "アプリケーションコード" --force
+          gh label create "type:database" --color "5319E7" --description "DB・SQL・インデックス" --force
+          gh label create "type:security" --color "D93F0B" --description "SSH・権限・秘密情報" --force
+          gh label create "type:bug" --color "D73A4A" --description "動作不良・設定不具合" --force
+          gh label create ai --color "7057FF" --description "AI Agent が作成・対応" --force
+
+      - name: create task parent issue
+        id: task-parent
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          parent_url=$(gh issue create \
+            --title "ISUCON 共通タスク" \
+            --label "type:task" \
+            --body "本 Issue は、リポジトリ作成時に登録する ISUCON 共通タスクの親 Issue です。")
+          echo "number=${parent_url##*/}" >> "$GITHUB_OUTPUT"
+
+      - name: create issues from task templates
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PARENT_NUMBER: ${{ steps.task-parent.outputs.number }}
+        run: |
+          issue_map=$(mktemp)
+
+          for task in tasks/*.md; do
+            if [ "$(basename "$task")" = "README.md" ]; then
+              continue
+            fi
+
+            title=$(awk -F '"' '/^title:/ { print $2; exit }' "$task")
+            labels=()
+            while IFS= read -r label; do
+              labels+=(--label "$label")
+            done < <(awk '/^  - / { sub(/^  - /, ""); print }' "$task")
+            body=$(awk 'BEGIN { section = 0 } /^---$/ { section++; next } section >= 2 { print }' "$task")
+            body="$body\n\n<!-- task-template: $(basename "$task") -->"
+
+            issue_url=$(gh issue create --title "$title" "${labels[@]}" --parent "$PARENT_NUMBER" --body "$body")
+
+            printf '%s\t%s\n' "$(basename "$task")" "${issue_url##*/}" >> "$issue_map"
+          done
+
+          while IFS=$'\t' read -r filename issue_number; do
+            task="tasks/$filename"
+            dependency_lines=""
+            while IFS= read -r dependency; do
+              dependency_number=$(awk -F '\t' -v key="$dependency" '$1 == key { print $2 }' "$issue_map")
+              if [ -z "$dependency_number" ]; then
+                echo "Unknown dependency $dependency in $filename" >&2
+                exit 1
+              fi
+              dependency_lines="${dependency_lines}"$'\n- Depends on #'"$dependency_number"
+            done < <(awk '/^depends_on:/ { in_dep=1; next } in_dep && /^  - / { sub(/^  - /, ""); print; next } in_dep { in_dep=0 }' "$task")
+
+            if [ -n "$dependency_lines" ]; then
+              body=$(gh issue view "$issue_number" --json body --jq .body)
+              body="${body}"$'\n\n## Dependencies\n'"${dependency_lines}"$'\n'
+              gh issue edit "$issue_number" --body "$body"
+            fi
+          done
+          < "$issue_map"
