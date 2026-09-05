@@ -12,7 +12,7 @@
 
 **add members**
 
-- [ ] Invite your team members from https://github.com/bgpat/isucon11q-20260905/settings/access.
+- [x] Invite your team members from https://github.com/bgpat/isucon11q-20260905/settings/access.
   - Run [Update SSH Keys](https://github.com/bgpat/isucon11q-20260905/actions/workflows/update-sshkeys.yml).
 
 #### in each competition server 
