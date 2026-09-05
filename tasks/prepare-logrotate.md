@@ -19,7 +19,8 @@ depends_on:
 
 # 対象サーバー
 
-アクセスログ、スロークエリ、アプリログがあるサーバー。
+アクセスログ、スロークエリ、アプリログがあるサーバー。ログパスは実機確認後に
+`LOG_FILES` へ明示して渡す。未確認のサーバー固有パスは既定値に追加しない。
 
 # 作業
 
@@ -47,21 +48,27 @@ done
 
 ## 2. ローカルに毎回同じコマンドを書く
 
-退避先は `/var/log/archive/` など、Git 管理外にする。パスは実機で存在確認したログだけにする。
+退避先は `/var/log/archive/` など、Git 管理外にする。`make rotate-logs` は既定で
+Issue に確認済みの nginx access/error log を対象にし、存在しないファイルは無視する。
+追加のログは、実機で確認した後に `LOG_FILES` で明示する。
 
 ```makefile
-STAMP := $(shell date +%Y%m%d-%H%M%S)
-LOG_ARCHIVE := /var/log/archive/$(STAMP)
+LOG_ARCHIVE_ROOT ?= /var/log/archive
+LOG_FILES ?= /var/log/nginx/access.log /var/log/nginx/error.log
 
-.PHONY: rotate-logs
 rotate-logs:
-	mkdir -p $(LOG_ARCHIVE)
-	-test -f /var/log/nginx/access.log && mv /var/log/nginx/access.log $(LOG_ARCHIVE)/
-	-nginx -s reopen
-	-test -f /var/log/mysql/mysql-slow.log && mv /var/log/mysql/mysql-slow.log $(LOG_ARCHIVE)/
-	-mysqladmin flush-logs
-	ls -l $(LOG_ARCHIVE)
+	# Makefile の rotate-logs を使用する。
 ```
+
+実機で確認済みの追加ログを切り出す場合:
+
+```bash
+make rotate-logs LOG_FILES='/var/log/nginx/access.log /var/log/nginx/error.log /confirmed/path.log'
+```
+
+この処理は対象ファイルをタイムスタンプ付きディレクトリへ移し、`nginx -s reopen`
+が利用可能な場合に nginx のファイルディスクリプタを再オープンする。MySQL slow log
+やアプリログは、実機でパスと再オープン方法を確認するまで対象に追加しない。
 
 ## 3. 一度実行して切り出せることを確認する
 
@@ -109,3 +116,4 @@ ssh s1 'ls -lt /var/log/archive | head; sudo tail -n 1 /var/log/nginx/access.log
 - 実行日時:
 - 対象ログ:
 - 退避先:
+- ローカル実装: `Makefile` の `rotate-logs`（未確認の実機では未実行）

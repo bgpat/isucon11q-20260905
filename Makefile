@@ -1,4 +1,5 @@
 HOSTNAME := $(shell hostname)
+BRANCH ?= master
 
 .PHONY: all
 all: git ssh commit /home/isucon/.bashrc /files/hosts/$(HOSTNAME)
@@ -125,6 +126,43 @@ endif
 
 .PHONY: monitoring
 monitoring: prometheus node_exporter process-exporter grafana-server
+
+.PHONY: deploy
+deploy:
+	test "$$(id -u)" -eq 0
+	cd / && git pull --ff-only origin "$(BRANCH)"
+	cd / && git rev-parse --short HEAD
+	$(MAKE) deploy-app
+
+.PHONY: deploy-app
+deploy-app:
+	test "$$(id -u)" -eq 0
+	test -d /home/isucon/webapp/go
+	test -f /home/isucon/webapp/go/go.mod
+	runuser -u isucon -- sh -c 'cd /home/isucon/webapp/go && go build -o isucondition .'
+	systemctl restart isucondition.go.service
+	systemctl is-active --quiet isucondition.go.service
+
+# Override LOG_FILES with paths confirmed on the target server. Do not add
+# unconfirmed server-specific paths here.
+LOG_ARCHIVE_ROOT ?= /var/log/archive
+LOG_FILES ?= /var/log/nginx/access.log /var/log/nginx/error.log
+
+.PHONY: rotate-logs
+rotate-logs:
+	set -eu; \
+	stamp="$$(date +%Y%m%d-%H%M%S)"; \
+	dest="$(LOG_ARCHIVE_ROOT)/$$stamp"; \
+	mkdir -p "$$dest"; \
+	for log in $(LOG_FILES); do \
+		if test -f "$$log"; then \
+			mkdir -p "$$dest/$$(dirname "$$log" | sed 's#^/##')"; \
+			mv "$$log" "$$dest/$$(dirname "$$log" | sed 's#^/##')/"; \
+		fi; \
+	done; \
+	if command -v nginx >/dev/null 2>&1; then nginx -s reopen; fi; \
+	printf 'Archived logs in %s\\n' "$$dest"; \
+	find "$$dest" -type f -print
 
 .PHONY: prometheus
 prometheus: /usr/local/bin/prometheus
