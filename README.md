@@ -1,4 +1,4 @@
-# isucon-boilerplate
+# isucon11q-20260905
 
 ## usage
 
@@ -8,12 +8,12 @@
 
 **create a new repository**
 
-- [ ] Create a new repository from https://github.com/dbgofy/isucon-boilerplate/generate.
+- [x] Create a new repository from https://github.com/dbgofy/isucon-boilerplate/generate.
 
 **add members**
 
-- [ ] Invite your team members from https://github.com/$GITHUB_REPOSITORY/settings/access.
-  - Run [Update SSH Keys](https://github.com/$GITHUB_REPOSITORY/actions/workflows/update-sshkeys.yml).
+- [ ] Invite your team members from https://github.com/bgpat/isucon11q-20260905/settings/access.
+  - Run [Update SSH Keys](https://github.com/bgpat/isucon11q-20260905/actions/workflows/update-sshkeys.yml).
 
 #### in each competition server 
 
@@ -26,14 +26,14 @@ ssh-keygen -t rsa
 cat ~/.ssh/id_rsa.pub
 ```
 
-Copy the result and register as a [deploy key](https://github.com/$GITHUB_REPOSITORY/settings/keys/new).
+Copy the result and register as a [deploy key](https://github.com/bgpat/isucon11q-20260905/settings/keys/new).
 
 **install**
 
 ```bash
 cd /
 git init
-git remote add origin git@github.com:$GITHUB_REPOSITORY.git
+git remote add origin git@github.com:bgpat/isucon11q-20260905.git
 git fetch origin master
 git reset --hard FETCH_HEAD
 make
