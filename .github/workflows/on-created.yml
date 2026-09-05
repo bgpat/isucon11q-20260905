@@ -84,8 +84,7 @@ jobs:
             body="$body"$'\n\n<!-- task-template: '"$filename"$' -->'
 
             issue_number=$(gh issue list --state all --limit 100 --json number,body \
-              --jq --arg marker "<!-- task-template: $filename -->" \
-              '.[] | select(.body | contains($marker)) | .number' | head -n 1)
+              --jq ".[] | select(.body | contains(\"<!-- task-template: $filename -->\")) | .number" | head -n 1)
             if [ -z "$issue_number" ]; then
               issue_url=$(gh issue create --title "$title" "${labels[@]}" --parent "$PARENT_NUMBER" --body "$body")
               issue_number=${issue_url##*/}
