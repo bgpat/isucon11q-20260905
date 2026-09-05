@@ -71,16 +71,23 @@ jobs:
             fi
 
             title=$(awk -F '"' '/^title:/ { print $2; exit }' "$task")
+            filename=$(basename "$task")
             labels=()
             while IFS= read -r label; do
               labels+=(--label "$label")
             done < <(awk 'BEGIN { in_labels = 0 } /^labels:/ { in_labels = 1; next } in_labels && /^  - / { sub(/^  - /, ""); print; next } in_labels { exit }' "$task")
             body=$(awk 'BEGIN { section = 0 } /^---$/ { section++; next } section >= 2 { print }' "$task")
-            body="$body\n\n<!-- task-template: $(basename "$task") -->"
+            body="$body"$'\n\n<!-- task-template: '"$filename"$' -->'
 
-            issue_url=$(gh issue create --title "$title" "${labels[@]}" --parent "$PARENT_NUMBER" --body "$body")
+            issue_number=$(gh issue list --state all --limit 100 --json number,body \
+              --jq --arg marker "<!-- task-template: $filename -->" \
+              '.[] | select(.body | contains($marker)) | .number' | head -n 1)
+            if [ -z "$issue_number" ]; then
+              issue_url=$(gh issue create --title "$title" "${labels[@]}" --parent "$PARENT_NUMBER" --body "$body")
+              issue_number=${issue_url##*/}
+            fi
 
-            printf '%s\t%s\n' "$(basename "$task")" "${issue_url##*/}" >> "$issue_map"
+            printf '%s\t%s\n' "$filename" "$issue_number" >> "$issue_map"
           done
 
           while IFS=$'\t' read -r filename issue_number; do
@@ -92,13 +99,21 @@ jobs:
                 echo "Unknown dependency $dependency in $filename" >&2
                 exit 1
               fi
+              dependency_id=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${dependency_number}" --jq .id)
+              if ! gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/dependencies/blocked_by" \
+                --jq '.[].number' | grep -qx "$dependency_number"; then
+                gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/dependencies/blocked_by" \
+                  -F issue_id="$dependency_id" --silent
+              fi
               dependency_lines="${dependency_lines}"$'\n- Depends on #'"$dependency_number"
             done < <(awk '/^depends_on:/ { in_dep=1; next } in_dep && /^  - / { sub(/^  - /, ""); print; next } in_dep { in_dep=0 }' "$task")
 
             if [ -n "$dependency_lines" ]; then
               body=$(gh issue view "$issue_number" --json body --jq .body)
-              body="${body}"$'\n\n## Dependencies\n'"${dependency_lines}"$'\n'
-              gh issue edit "$issue_number" --body "$body"
+              if [[ "$body" != *"## Dependencies"* ]]; then
+                body="${body}"$'\n\n## Dependencies\n'"${dependency_lines}"$'\n'
+                gh issue edit "$issue_number" --body "$body"
+              fi
             fi
           done
           < "$issue_map"
