@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/exec"
 	"strconv"
@@ -243,6 +244,9 @@ func main() {
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
+	if getEnv("ENABLE_PPROF", "0") == "1" {
+		e.GET("/debug/pprof/*", echo.WrapHandler(http.DefaultServeMux))
+	}
 
 	e.POST("/initialize", postInitialize)
 
