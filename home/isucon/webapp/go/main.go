@@ -1018,7 +1018,7 @@ func getIsuConditions(c echo.Context) error {
 }
 
 // ISUのコンディションをDBから取得
-func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, conditionLevel map[string]interface{}, startTime time.Time,
+func getIsuConditionsFromDBLegacy(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, conditionLevel map[string]interface{}, startTime time.Time,
 	limit int, isuName string) ([]*GetIsuConditionResponse, error) {
 
 	conditions := []IsuCondition{}
@@ -1070,6 +1070,65 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 	}
 
 	return conditionsResponse, nil
+}
+
+func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, conditionLevel map[string]interface{}, startTime time.Time,
+	limit int, isuName string) ([]*GetIsuConditionResponse, error) {
+	// condition level は文字列から算出するため SQL で絞れない。全件を転送せず、
+	// 時刻・id の keyset pagination で取得し、必要件数に達したら停止する。
+	const batchSize = 64
+	conditionsResponse := make([]*GetIsuConditionResponse, 0, limit)
+	var cursorTimestamp time.Time
+	var cursorID int
+	hasCursor := false
+
+	for {
+		query := "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ? AND `timestamp` < ?"
+		args := []interface{}{jiaIsuUUID, endTime}
+		if !startTime.IsZero() {
+			query += " AND `timestamp` >= ?"
+			args = append(args, startTime)
+		}
+		if hasCursor {
+			query += " AND (`timestamp` < ? OR (`timestamp` = ? AND `id` < ?))"
+			args = append(args, cursorTimestamp, cursorTimestamp, cursorID)
+		}
+		query += " ORDER BY `timestamp` DESC, `id` DESC LIMIT ?"
+		args = append(args, batchSize)
+
+		conditions := []IsuCondition{}
+		if err := db.Select(&conditions, query, args...); err != nil {
+			return nil, fmt.Errorf("db error: %v", err)
+		}
+		for _, condition := range conditions {
+			level, err := calculateConditionLevel(condition.Condition)
+			if err != nil {
+				continue
+			}
+			if _, ok := conditionLevel[level]; !ok {
+				continue
+			}
+			conditionsResponse = append(conditionsResponse, &GetIsuConditionResponse{
+				JIAIsuUUID:     condition.JIAIsuUUID,
+				IsuName:        isuName,
+				Timestamp:      condition.Timestamp.Unix(),
+				IsSitting:      condition.IsSitting,
+				Condition:      condition.Condition,
+				ConditionLevel: level,
+				Message:        condition.Message,
+			})
+			if len(conditionsResponse) == limit {
+				return conditionsResponse, nil
+			}
+		}
+		if len(conditions) < batchSize {
+			return conditionsResponse, nil
+		}
+		lastCondition := conditions[len(conditions)-1]
+		cursorTimestamp = lastCondition.Timestamp
+		cursorID = lastCondition.ID
+		hasCursor = true
+	}
 }
 
 // ISUのコンディションの文字列からコンディションレベルを計算
