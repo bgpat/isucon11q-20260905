@@ -98,7 +98,7 @@ PNG は Viewer の Export、または visual-check のスクリーンショッ�
 
 ```bash
 cd "$ARCHIFY"
-for html in "$OLDPWD"//tmp/isucon-results/architecture/*.html; do
+for html in /tmp/isucon-results/architecture/*.html; do
   [ -f "$html" ] || continue
   node bin/archify.mjs visual-check "$html" --json
 done
