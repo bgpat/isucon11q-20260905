@@ -95,7 +95,6 @@ jobs:
 
           while IFS=$'\t' read -r filename issue_number; do
             task="tasks/$filename"
-            dependency_lines=""
             while IFS= read -r dependency; do
               dependency_number=$(awk -F '\t' -v key="$dependency" '$1 == key { print $2 }' "$issue_map")
               if [ -z "$dependency_number" ]; then
@@ -108,15 +107,6 @@ jobs:
                 gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/dependencies/blocked_by" \
                   -F issue_id="$dependency_id" --silent
               fi
-              dependency_lines="${dependency_lines}"$'\n- Depends on #'"$dependency_number"
             done < <(awk '/^depends_on:/ { in_dep=1; next } in_dep && /^  - / { sub(/^  - /, ""); print; next } in_dep { in_dep=0 }' "$task")
-
-            if [ -n "$dependency_lines" ]; then
-              body=$(gh issue view "$issue_number" --json body --jq .body)
-              if [[ "$body" != *"## Dependencies"* ]]; then
-                body="${body}"$'\n\n## Dependencies\n'"${dependency_lines}"$'\n'
-                gh issue edit "$issue_number" --body "$body"
-              fi
-            fi
           done
           < "$issue_map"
