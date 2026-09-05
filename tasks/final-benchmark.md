@@ -29,6 +29,7 @@ depends_on:
 - 提出用ベンチマークを実行する。
 - スコア、エラー、ログ、実行日時を保存する。
 - スコアと結果を Pull Request に記載する。
+- default branch で実行した各ベンチマークについて、実行時の exact commit を target とする GitHub Release を作成する。
 
 ## 実行例
 
@@ -101,6 +102,30 @@ EOF
 )"
 ```
 
+## 5. GitHub Release を作成する
+
+最終ベンチマークごとに、実行時に記録した default branch の exact commit をtargetにしてReleaseを作成する。failした場合も、スコア欄を実測どおり `fail` または `0` として記録し、Releaseを省略しない。
+
+```bash
+TARGET_COMMIT=$(grep '^commit=' "$DIR/meta.txt" | cut -d= -f2)
+TAG="final-${STAMP}-score-${SCORE}"
+gh release create "$TAG" \
+  --repo "$REPO" \
+  --target "$TARGET_COMMIT" \
+  --title "final ${STAMP} score ${SCORE}" \
+  --notes "$(cat <<EOF
+- 種別: 最終ベンチマーク
+- 実行日時: ${STAMP}
+- 対象 commit: ${TARGET_COMMIT}
+- 対象サーバー: ${SERVERS[*]}
+- 条件: Issue を参照
+- スコア: ${SCORE}
+- エラー: ${ERRORS}
+- 関連 Issue: #${ISSUE}
+EOF
+)"
+```
+
 # 確認方法
 
 ```bash
@@ -125,3 +150,4 @@ cat "$DIR/meta.txt" "$DIR/score.txt"
 - commit:
 - スコア:
 - 保存先:
+- GitHub Release URL:

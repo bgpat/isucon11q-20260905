@@ -171,8 +171,9 @@ DB の初期データなど Git に入れないデータで、復旧や比較に
 
 ベンチマーク実行後のスコアを Pull Request に記載する。可能な限り、実行日時、対象サーバー、条件、差分、エラーの有無、関連ログも記録する。
 
-Pull Request が default branch にマージされた後は、タイムスタンプとスコアを含む名前で GitHub Release を作成する。
-Release には変更内容の要約、関連 Issue へのリンク、関連 Pull Request へのリンク、必要に応じてベンチマーク結果や既知の問題を記載する。
+default branch で実行したベンチマークは、ベースライン、比較計測、提出用、成功、失敗を問わず、1回ごとに GitHub Release を作成する。Release はベンチマーク実行時の exact commit を target とし、タイムスタンプ、スコアまたは fail、実行日時、対象サーバー、条件、エラー、関連 Issue、関連 Pull Request、ベースラインか最終結果かを記録する。
+
+Pull Request が default branch にマージされた後も、ベンチマークを実行した場合は同じルールで Release を作成する。Release には変更内容の要約、関連 Issue へのリンク、関連 Pull Request へのリンク、必要に応じてベンチマーク結果や既知の問題を記載する。
 
 ## 一回限りの作業
 
