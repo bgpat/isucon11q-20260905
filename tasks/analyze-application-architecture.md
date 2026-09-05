@@ -39,7 +39,7 @@ depends_on:
 コマンドは実行例である。問題や環境によって構成、パス、サービス名、言語、接続方法は異なる。Issue に記録したユーザー提供情報と実機の状態に合わせて読み替える。
 
 ```bash
-mkdir -p /tmp/isucon-results/architecture
+mkdir -p /tmp/isucon-work/architecture
 ARCHIFY= # bin/archify.mjs がある Archify Skill のルート
 test -f "$ARCHIFY/bin/archify.mjs"
 ```
@@ -86,19 +86,19 @@ JSON を書いたら、種類ごとに validate してから deliver する。�
 ```bash
 cd "$ARCHIFY"
 for t in architecture workflow sequence dataflow lifecycle; do
-  src="/tmp/isucon-results/architecture/${t}.json"
-  out="/tmp/isucon-results/architecture/${t}.html"
+  src="/tmp/isucon-work/architecture/${t}.json"
+  out="/tmp/isucon-work/architecture/${t}.html"
   [ -f "$src" ] || continue
   node bin/archify.mjs validate "$t" "$src" --quality showcase --json
   node bin/archify.mjs deliver "$t" "$src" "$out" --quality showcase --json
 done
 ```
 
-PNG は Viewer の Export、または visual-check のスクリーンショットを `/tmp/isucon-results/architecture/` に置く。
+PNG は Viewer の Export、または visual-check のスクリーンショットを `/tmp/isucon-work/architecture/` に置く。
 
 ```bash
 cd "$ARCHIFY"
-for html in /tmp/isucon-results/architecture/*.html; do
+for html in /tmp/isucon-work/architecture/*.html; do
   [ -f "$html" ] || continue
   node bin/archify.mjs visual-check "$html" --json
 done
@@ -106,7 +106,7 @@ done
 
 ## 4. 重要な点を文章と mermaid で Issue に書く
 
-Archify の詳細図は添付にする。Issue 本文には、以後の改善判断に使う点だけを短く書く。mermaid は確認した名前に置き換える。未確認のノードを足さない。コメント原稿は `/tmp/isucon-results/architecture/issue-comment.md` に置く。
+Archify の詳細図は添付にする。Issue 本文には、以後の改善判断に使う点だけを短く書く。mermaid は確認した名前に置き換える。未確認のノードを足さない。コメント原稿は `/tmp/isucon-work/architecture/issue-comment.md` に置く。
 
 ````markdown
 ## 参照
@@ -169,13 +169,13 @@ stateDiagram-v2
 
 ## 成果物
 
-- `/tmp/isucon-results/architecture/*.html`
-- `/tmp/isucon-results/architecture/*.json`
+- `/tmp/isucon-work/architecture/*.html`
+- `/tmp/isucon-work/architecture/*.json`
 - 省略した図の種類と理由:
 ````
 
 ```bash
-gh issue comment "$ISSUE" --body-file /tmp/isucon-results/architecture/issue-comment.md
+gh issue comment "$ISSUE" --body-file /tmp/isucon-work/architecture/issue-comment.md
 ```
 
 ## 5. レポートを Issue に添付する
@@ -183,31 +183,31 @@ gh issue comment "$ISSUE" --body-file /tmp/isucon-results/architecture/issue-com
 HTML と JSON は Issue コメントへの添付対象である。GitHub CLI の `--attach` は画像・動画のみなので、HTML と JSON は Issue 画面にドロップする。PNG は `--attach` があれば使い、無ければ同様にドロップする。
 
 ```bash
-ls -l /tmp/isucon-results/architecture
-zip -j /tmp/isucon-results/architecture/archify-reports.zip /tmp/isucon-results/architecture/*.html /tmp/isucon-results/architecture/*.json
+ls -l /tmp/isucon-work/architecture
+zip -j /tmp/isucon-work/architecture/archify-reports.zip /tmp/isucon-work/architecture/*.html /tmp/isucon-work/architecture/*.json
 
 # --attach がある gh なら PNG をコメントに埋め込む
 gh issue comment "$ISSUE" --body "Archify レポートの PNG" \
-  --attach /tmp/isucon-results/architecture/architecture.png#architecture \
-  --attach /tmp/isucon-results/architecture/workflow.png#workflow \
-  --attach /tmp/isucon-results/architecture/sequence.png#sequence \
-  --attach /tmp/isucon-results/architecture/dataflow.png#dataflow \
-  --attach /tmp/isucon-results/architecture/lifecycle.png#lifecycle
+  --attach /tmp/isucon-work/architecture/architecture.png#architecture \
+  --attach /tmp/isucon-work/architecture/workflow.png#workflow \
+  --attach /tmp/isucon-work/architecture/sequence.png#sequence \
+  --attach /tmp/isucon-work/architecture/dataflow.png#dataflow \
+  --attach /tmp/isucon-work/architecture/lifecycle.png#lifecycle
 ```
 
 `--attach` が使えない、または一部の PNG が無い場合は、Issue コメント欄へ次をドロップする。
 
-- `/tmp/isucon-results/architecture/*.html`
-- `/tmp/isucon-results/architecture/*.json`
-- `/tmp/isucon-results/architecture/*.png`
-- `/tmp/isucon-results/architecture/archify-reports.zip`
+- `/tmp/isucon-work/architecture/*.html`
+- `/tmp/isucon-work/architecture/*.json`
+- `/tmp/isucon-work/architecture/*.png`
+- `/tmp/isucon-work/architecture/archify-reports.zip`
 
 添付後、コメントから HTML と PNG を辿れることを確認する。HTML は GitHub 上では実行されない。閲覧はダウンロードしてローカルで開く。
 
 # 確認方法
 
 ```bash
-ls -l /tmp/isucon-results/architecture
+ls -l /tmp/isucon-work/architecture
 gh issue view "$ISSUE" --comments
 ```
 
@@ -233,6 +233,6 @@ Issue に事実と仮説が分かれて書かれ、重要な点の mermaid が�
 
 - 実行日時:
 - 確認した commit:
-- 保存先: `/tmp/isucon-results/architecture/`
+- 保存先: `/tmp/isucon-work/architecture/`
 - 添付したファイル:
 - 省略した図:

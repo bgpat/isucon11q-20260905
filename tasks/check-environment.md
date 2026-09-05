@@ -36,14 +36,14 @@ Issue に記録した全競技サーバー。
 
 ```bash
 SERVERS=(s1 s2 s3)
-mkdir -p /tmp/isucon-results/env
+mkdir -p /tmp/isucon-work/env
 ```
 
 hostname、OS、資源、ネットワーク、listen、hosts の確認。
 
 ```bash
 for s in "${SERVERS[@]}"; do
-  ssh "$s" 'bash -s' <<'EOF' | tee "/tmp/isucon-results/env/${s}.txt"
+  ssh "$s" 'bash -s' <<'EOF' | tee "/tmp/isucon-work/env/${s}.txt"
 echo "### hostname"
 hostname; hostname -s; hostname -I
 echo "### os"
@@ -86,7 +86,7 @@ done
 
 ```bash
 for s in "${SERVERS[@]}"; do
-  ssh "$s" 'bash -s' <<'EOF' | tee -a "/tmp/isucon-results/env/${s}.txt"
+  ssh "$s" 'bash -s' <<'EOF' | tee -a "/tmp/isucon-work/env/${s}.txt"
 echo "### nginx"
 systemctl is-active nginx 2>/dev/null || true
 nginx -t 2>/dev/null || true
@@ -108,7 +108,7 @@ done
 gh issue comment "$ISSUE" --body "$(cat <<EOF
 ## 実測
 
-各サーバーの出力は \`/tmp/isucon-results/env/\` に保存した。
+各サーバーの出力は \`/tmp/isucon-work/env/\` に保存した。
 
 ## バージョン
 
@@ -131,9 +131,9 @@ EOF
 # 確認方法
 
 ```bash
-ls /tmp/isucon-results/env
-grep -H 'hostname' /tmp/isucon-results/env/*.txt
-grep -A20 '### versions' /tmp/isucon-results/env/*.txt
+ls /tmp/isucon-work/env
+grep -H 'hostname' /tmp/isucon-work/env/*.txt
+grep -A20 '### versions' /tmp/isucon-work/env/*.txt
 ```
 
 # 失敗時の復旧
@@ -150,5 +150,5 @@ grep -A20 '### versions' /tmp/isucon-results/env/*.txt
 # 作業後の記録
 
 - 実行日時:
-- 保存先: `/tmp/isucon-results/env/`
+- 保存先: `/tmp/isucon-work/env/`
 - 関連 Issue:

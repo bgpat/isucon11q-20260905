@@ -72,13 +72,13 @@ gh pr list --repo "$REPO" --state all --limit 50
 ## 3. 公開 URL を Issue に記録する
 
 ```bash
-mkdir -p /tmp/isucon-results/retrospective
-cat > /tmp/isucon-results/retrospective/comment.md <<'EOF'
+mkdir -p /tmp/isucon-work/retrospective
+cat > /tmp/isucon-work/retrospective/comment.md <<'EOF'
 - 公開先 URL:
 - 公開範囲:
 - 使った一次情報（Release / Issue / PR）:
 EOF
-gh issue comment "$ISSUE" --body-file /tmp/isucon-results/retrospective/comment.md
+gh issue comment "$ISSUE" --body-file /tmp/isucon-work/retrospective/comment.md
 ```
 
 # 確認方法

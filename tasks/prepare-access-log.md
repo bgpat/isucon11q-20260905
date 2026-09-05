@@ -36,7 +36,7 @@ depends_on:
 
 ```bash
 SERVERS=(s1 s2 s3)
-mkdir -p /tmp/isucon-results/alp
+mkdir -p /tmp/isucon-work/alp
 ```
 
 ## 1. ログ形式を確認する
@@ -112,7 +112,7 @@ LTSV の場合の集計例。`--file` は確認したパスにする。`MATCHING
 # 未確認のパスを書かない
 MATCHING='REPLACE_AFTER_READING_ROUTES'
 ssh s1 "sudo alp ltsv --file /var/log/nginx/access.log -m '$MATCHING' --sort sum -r -o count,method,uri,min,avg,max,sum,p99 | head -n 40" \
-  | tee /tmp/isucon-results/alp/first.txt
+  | tee /tmp/isucon-work/alp/first.txt
 ```
 
 ## 4. 提出前に影響を除けることを確認する
@@ -126,8 +126,8 @@ ssh s1 "sudo alp ltsv --file /var/log/nginx/access.log -m '$MATCHING' --sort sum
 # 確認方法
 
 ```bash
-test -s /tmp/isucon-results/alp/first.txt
-head /tmp/isucon-results/alp/first.txt
+test -s /tmp/isucon-work/alp/first.txt
+head /tmp/isucon-work/alp/first.txt
 ```
 
 # 失敗時の復旧
