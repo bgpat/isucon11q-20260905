@@ -1,3 +1,14 @@
 *
 !.gitignore
 !.git-preserve-permissions
+# SQL schema and initialization sources
+!/home
+/home/*
+!/home/isucon
+/home/isucon/*
+!/home/isucon/webapp
+/home/isucon/webapp/*
+!/home/isucon/webapp/sql
+/home/isucon/webapp/sql/*
+!/home/isucon/webapp/sql/0_Schema.sql
+!/home/isucon/webapp/sql/init.sh
