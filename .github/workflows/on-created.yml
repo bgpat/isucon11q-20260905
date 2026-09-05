@@ -51,14 +51,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          parent_url=$(gh issue list --state all --limit 100 \
+          mapfile -t parent_urls < <(gh issue list --state all --limit 100 \
             --json title,url \
-            --jq '.[] | select(.title == "ISUCON 共通タスク") | .url' | head -n 1)
-          if [ -z "$parent_url" ]; then
+            --jq '.[] | select(.title == "ISUCON 共通タスク") | .url')
+          if [ "${#parent_urls[@]}" -gt 1 ]; then
+            echo "Duplicate task parent issues found: ${parent_urls[*]}" >&2
+            exit 1
+          fi
+          if [ "${#parent_urls[@]}" -eq 1 ]; then
+            parent_url="${parent_urls[0]}"
+          else
             parent_url=$(gh issue create \
               --title "ISUCON 共通タスク" \
               --label "type:task" \
               --body "本 Issue は、リポジトリ作成時に登録する ISUCON 共通タスクの親 Issue です。")
+            mapfile -t parent_urls < <(gh issue list --state all --limit 100 \
+              --json title,url \
+              --jq '.[] | select(.title == "ISUCON 共通タスク") | .url')
+            if [ "${#parent_urls[@]}" -ne 1 ]; then
+              echo "Task parent uniqueness check failed: ${parent_urls[*]}" >&2
+              exit 1
+            fi
           fi
           echo "number=${parent_url##*/}" >> "$GITHUB_OUTPUT"
 
@@ -83,11 +96,27 @@ jobs:
             body=$(awk 'BEGIN { section = 0 } /^---$/ { section++; next } section >= 2 { print }' "$task")
             body="$body"$'\n\n<!-- task-template: '"$filename"$' -->'
 
-            issue_number=$(gh issue list --state all --limit 100 --json number,body \
-              --jq ".[] | select(.body | contains(\"<!-- task-template: $filename -->\")) | .number" | head -n 1)
-            if [ -z "$issue_number" ]; then
+            mapfile -t task_numbers < <(gh issue list --state all --limit 100 --json number,body \
+              --jq ".[] | select(.body | contains(\"<!-- task-template: $filename -->\")) | .number")
+            if [ "${#task_numbers[@]}" -gt 1 ]; then
+              echo "Duplicate task issues found for $filename: ${task_numbers[*]}" >&2
+              exit 1
+            fi
+            if [ "${#task_numbers[@]}" -eq 1 ]; then
+              issue_number="${task_numbers[0]}"
+            else
               issue_url=$(gh issue create --title "$title" "${labels[@]}" --parent "$PARENT_NUMBER" --body "$body")
               issue_number=${issue_url##*/}
+              for attempt in 1 2 3 4 5; do
+                mapfile -t task_numbers < <(gh issue list --state all --limit 100 --json number,body \
+                  --jq ".[] | select(.body | contains(\"<!-- task-template: $filename -->\")) | .number")
+                [ "${#task_numbers[@]}" -eq 1 ] && break
+                sleep 2
+              done
+              if [ "${#task_numbers[@]}" -ne 1 ]; then
+                echo "Task uniqueness check failed for $filename: ${task_numbers[*]}" >&2
+                exit 1
+              fi
             fi
 
             printf '%s\t%s\n' "$filename" "$issue_number" >> "$issue_map"
