@@ -1090,13 +1090,13 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
-	trendCache.RLock()
+	// キャッシュミス時のDB再計算を1リクエストに限定する。
+	trendCache.Lock()
+	defer trendCache.Unlock()
 	if trendCache.valid {
 		res := trendCache.response
-		trendCache.RUnlock()
 		return c.JSON(http.StatusOK, res)
 	}
-	trendCache.RUnlock()
 
 	characterList := []Isu{}
 	err := db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
@@ -1156,10 +1156,8 @@ func getTrend(c echo.Context) error {
 			Critical:  critical[character.Character],
 		})
 	}
-	trendCache.Lock()
 	trendCache.response = res
 	trendCache.valid = true
-	trendCache.Unlock()
 
 	return c.JSON(http.StatusOK, res)
 }
