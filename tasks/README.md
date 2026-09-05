@@ -18,12 +18,12 @@
 
 各タスクの `depends_on` には、先に完了させるタスクのファイル名を記載する。
 依存関係がないタスクは `depends_on: []` とする。
-Issue 化時には `depends_on` が依存先 Issue への `Depends on #番号` として本文に反映される。
+Issue 化時には `depends_on` を依存先IssueへのGitHub Issue dependency（blocked by）として登録し、本文にも `Depends on #番号` として反映する。
 
 リポジトリ作成時に `on-created` workflow が有効な場合は、`tasks/*.md`（`README.md` を除く）から
 自動的に Issue が作成される。自動作成後に、対象競技やサーバー情報など問題ごとの内容を追記する。
 作成された「ISUCON 共通タスク」Issue の sub-issue として登録される。
-依存関係のあるタスクは、リポジトリ作成時に限らず、親となる Issue の sub-issue として登録する。
+`depends_on` はsub-issueの親子関係ではなく、複数の依存先を表現できるIssue dependency（blocked by）として登録する。共通タスクのsub-issueの親を依存先へ変更してはならない。
 
 phase label は作業を行う時期を表す。
 
