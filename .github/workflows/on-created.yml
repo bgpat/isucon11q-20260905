@@ -47,10 +47,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          parent_url=$(gh issue create \
-            --title "ISUCON 共通タスク" \
-            --label "type:task" \
-            --body "本 Issue は、リポジトリ作成時に登録する ISUCON 共通タスクの親 Issue です。")
+          parent_url=$(gh issue list --state all --limit 100 \
+            --json title,url \
+            --jq '.[] | select(.title == "ISUCON 共通タスク") | .url' | head -n 1)
+          if [ -z "$parent_url" ]; then
+            parent_url=$(gh issue create \
+              --title "ISUCON 共通タスク" \
+              --label "type:task" \
+              --body "本 Issue は、リポジトリ作成時に登録する ISUCON 共通タスクの親 Issue です。")
+          fi
           echo "number=${parent_url##*/}" >> "$GITHUB_OUTPUT"
 
       - name: create issues from task templates
@@ -69,7 +74,7 @@ jobs:
             labels=()
             while IFS= read -r label; do
               labels+=(--label "$label")
-            done < <(awk '/^  - / { sub(/^  - /, ""); print }' "$task")
+            done < <(awk 'BEGIN { in_labels = 0 } /^labels:/ { in_labels = 1; next } in_labels && /^  - / { sub(/^  - /, ""); print; next } in_labels { exit }' "$task")
             body=$(awk 'BEGIN { section = 0 } /^---$/ { section++; next } section >= 2 { print }' "$task")
             body="$body\n\n<!-- task-template: $(basename "$task") -->"
 
