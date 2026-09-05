@@ -1,6 +1,6 @@
 name: On Created
 
-# boilerplate へ取り込むために保持する。現在のリポジトリでは job を実行しない。
+# リポジトリ作成時に共通タスクとラベルを自動作成する。
 on:
   push:
     branches:
@@ -13,7 +13,7 @@ permissions:
 jobs:
   on-created:
     runs-on: ubuntu-latest
-    if: ${{ github.repository != 'bgpat/isucon11q-20260905' && github.repository != 'dbgofy/isucon-boilerplate' }}
+    if: ${{ github.repository != 'dbgofy/isucon-boilerplate' }}
     steps:
       - uses: actions/checkout@v4
       - name: create issue labels
