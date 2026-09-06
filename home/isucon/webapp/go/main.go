@@ -1473,7 +1473,7 @@ func postIsuCondition(c echo.Context) error {
 			return c.String(http.StatusBadRequest, "bad request body")
 		}
 		if i == 0 {
-			valueSelects = append(valueSelects, "SELECT ? AS jia_isu_uuid, ? AS timestamp, ? AS is_sitting, ? AS condition, ? AS message")
+			valueSelects = append(valueSelects, "SELECT ? AS jia_isu_uuid, ? AS timestamp, ? AS is_sitting, ? AS condition_text, ? AS message")
 		} else {
 			valueSelects = append(valueSelects, "SELECT ?, ?, ?, ?, ?")
 		}
@@ -1481,7 +1481,7 @@ func postIsuCondition(c echo.Context) error {
 	}
 	result, err := db.Exec(
 		"INSERT INTO `isu_condition` (`jia_isu_uuid`, `timestamp`, `is_sitting`, `condition`, `message`) "+
-			"SELECT values_to_insert.jia_isu_uuid, values_to_insert.timestamp, values_to_insert.is_sitting, values_to_insert.condition, values_to_insert.message "+
+			"SELECT values_to_insert.jia_isu_uuid, values_to_insert.timestamp, values_to_insert.is_sitting, values_to_insert.condition_text, values_to_insert.message "+
 			"FROM ("+strings.Join(valueSelects, " UNION ALL ")+") AS values_to_insert "+
 			"INNER JOIN `isu` ON `isu`.`jia_isu_uuid` = values_to_insert.jia_isu_uuid",
 		args...,
