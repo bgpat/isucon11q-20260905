@@ -33,6 +33,21 @@ class SQLTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 report.final_score(invalid)
 
+    def test_interleaved_streams(self):
+        log = ('22:26:06.811001 score: 201602(201654 - 52) : pass\n'
+               '22:26:06.810346 <=== LOAD END\n'
+               '22:26:06.811007 <=== sendResult finish\n')
+        self.assertEqual(report.final_score(log),(201602,'pass'))
+        with self.assertRaises(ValueError):
+            report.final_score(log.replace('22:26:06.811001','22:26:03.811001'))
+
+    def test_midnight_and_stale_score(self):
+        log = ('00:00:00.001 score: 99(100 - 1) : pass\n'
+               '23:59:59.990 <=== LOAD END\n'
+               '23:59:56.000 score: 89(90 - 1) : pass\n'
+               '00:00:00.002 <=== sendResult finish\n')
+        self.assertEqual(report.final_score(log),(99,'pass'))
+
 
 if __name__ == '__main__':
     unittest.main()
