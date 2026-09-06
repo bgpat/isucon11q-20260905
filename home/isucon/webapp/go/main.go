@@ -85,7 +85,9 @@ var (
 	}
 	// 存在する jia_isu_uuid だけを持つ正のキャッシュ。未ヒット（404）は載せない。
 	isuUUIDCache sync.Map
-	graphCache   struct {
+	// ディスクに書いたアイコンの正のキャッシュ。未ヒットは載せない。
+	iconFileCache sync.Map
+	graphCache    struct {
 		sync.Mutex
 		entries map[graphCacheKey][]byte
 	}
@@ -220,6 +222,26 @@ func isuIconCachePath(jiaUserID, jiaIsuUUID string) string {
 	return filepath.Join(isuIconCacheDir, fmt.Sprintf("%x", digest))
 }
 
+func cachedIconKey(jiaUserID, jiaIsuUUID string) string {
+	return jiaUserID + "\x00" + jiaIsuUUID
+}
+
+func rememberCachedIcon(jiaUserID, jiaIsuUUID string) {
+	iconFileCache.Store(cachedIconKey(jiaUserID, jiaIsuUUID), struct{}{})
+}
+
+func hasCachedIcon(jiaUserID, jiaIsuUUID string) bool {
+	_, ok := iconFileCache.Load(cachedIconKey(jiaUserID, jiaIsuUUID))
+	return ok
+}
+
+func invalidateCachedIcon() {
+	iconFileCache.Range(func(key, _ interface{}) bool {
+		iconFileCache.Delete(key)
+		return true
+	})
+}
+
 func cacheIsuIcon(jiaUserID, jiaIsuUUID string, image []byte) (string, error) {
 	if err := os.MkdirAll(isuIconCacheDir, 0755); err != nil {
 		return "", err
@@ -247,13 +269,17 @@ func cacheIsuIcon(jiaUserID, jiaIsuUUID string, image []byte) (string, error) {
 	if err := os.Rename(tempPath, path); err != nil {
 		return "", err
 	}
+	rememberCachedIcon(jiaUserID, jiaIsuUUID)
 	return path, nil
 }
 
 func serveCachedIsuIcon(c echo.Context, jiaUserID, jiaIsuUUID string) bool {
 	path := isuIconCachePath(jiaUserID, jiaIsuUUID)
-	if _, err := os.Stat(path); err != nil {
-		return false
+	if !hasCachedIcon(jiaUserID, jiaIsuUUID) {
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+		rememberCachedIcon(jiaUserID, jiaIsuUUID)
 	}
 	c.Response().Header().Set("X-Accel-Redirect", isuIconInternalPath+filepath.Base(path))
 	c.Response().Header().Set("Cache-Control", "private, max-age=60, must-revalidate")
@@ -586,6 +612,7 @@ func postInitialize(c echo.Context) error {
 	invalidateIsuUUIDCache()
 	invalidateIsuMetaCache()
 	invalidateGraphCache()
+	invalidateCachedIcon()
 	if err := os.RemoveAll(isuIconCacheDir); err != nil {
 		c.Logger().Errorf("failed to clear icon cache: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
