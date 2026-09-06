@@ -1516,8 +1516,10 @@ func getTrend(c echo.Context) error {
 	}
 	gen, _, _ := snapshotTrendCache()
 
+	// postIsu は character 無しで INSERT してから JIA activate する。
+	// その間の trend 再計算が NULL を Scan しないよう除外する。
 	characterList := []Isu{}
-	err := db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
+	err := db.Select(&characterList, "SELECT `character` FROM `isu` WHERE `character` IS NOT NULL GROUP BY `character`")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1528,7 +1530,7 @@ func getTrend(c echo.Context) error {
 		JIAIsuUUID string `db:"jia_isu_uuid"`
 		Character  string `db:"character"`
 	}{}
-	err = db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu`")
+	err = db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu` WHERE `character` IS NOT NULL")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
