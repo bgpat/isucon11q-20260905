@@ -21,3 +21,7 @@
 !/etc/systemd/system
 /etc/systemd/system/*
 !/etc/systemd/system/isucondition.go.service
+# 継続目標の終了ガード
+!/ops
+/ops/*
+!/ops/goal-score-guard.sh
