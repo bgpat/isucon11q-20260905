@@ -144,6 +144,12 @@ deploy-app:
 	systemctl restart isucondition.go.service
 	systemctl is-active --quiet isucondition.go.service
 
+.PHONY: upgrade-go
+upgrade-go:
+	test "$$(id -u)" -eq 0
+	/ops/install-go.sh
+	$(MAKE) deploy-app
+
 # Override LOG_FILES with paths confirmed on the target server. Do not add
 # unconfirmed server-specific paths here.
 LOG_ARCHIVE_ROOT ?= /var/log/archive
