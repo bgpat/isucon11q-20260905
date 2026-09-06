@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -403,6 +404,20 @@ func main() {
 	postIsuConditionTargetBaseURL = os.Getenv("POST_ISUCONDITION_TARGET_BASE_URL")
 	if postIsuConditionTargetBaseURL == "" {
 		e.Logger.Fatalf("missing: POST_ISUCONDITION_TARGET_BASE_URL")
+		return
+	}
+
+	if socketPath := os.Getenv("SERVER_UNIX_SOCKET"); socketPath != "" {
+		if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			e.Logger.Fatalf("failed to remove unix socket: %v", err)
+			return
+		}
+		listener, err := net.Listen("unix", socketPath)
+		if err != nil {
+			e.Logger.Fatalf("failed to listen unix socket: %v", err)
+			return
+		}
+		e.Logger.Fatal(e.Server.Serve(listener))
 		return
 	}
 
