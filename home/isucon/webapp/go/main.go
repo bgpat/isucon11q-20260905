@@ -5,7 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/json"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/ioutil"
