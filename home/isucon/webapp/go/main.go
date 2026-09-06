@@ -1227,7 +1227,7 @@ func getTrend(c echo.Context) error {
 
 // POST /api/condition/:jia_isu_uuid
 // ISUからのコンディションを受け取る
-func postIsuCondition(c echo.Context) error {
+func postIsuConditionLegacy(c echo.Context) error {
 	// TODO: 一定割合リクエストを落としてしのぐようにしたが、本来は全量さばけるようにすべき
 	dropProbability := 0.9
 	if rand.Float64() <= dropProbability {
@@ -1291,6 +1291,65 @@ func postIsuCondition(c echo.Context) error {
 	}
 	invalidateTrendCache()
 
+	return c.NoContent(http.StatusAccepted)
+}
+
+func postIsuCondition(c echo.Context) error {
+	// 既存の暫定的な drop 挙動は変更しない。DB 書き込みだけを一括化する。
+	dropProbability := 0.9
+	if rand.Float64() <= dropProbability {
+		c.Logger().Warnf("drop post isu condition request")
+		return c.NoContent(http.StatusAccepted)
+	}
+
+	jiaIsuUUID := c.Param("jia_isu_uuid")
+	if jiaIsuUUID == "" {
+		return c.String(http.StatusBadRequest, "missing: jia_isu_uuid")
+	}
+	req := []PostIsuConditionRequest{}
+	if err := c.Bind(&req); err != nil {
+		return c.String(http.StatusBadRequest, "bad request body")
+	} else if len(req) == 0 {
+		return c.String(http.StatusBadRequest, "bad request body")
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	defer tx.Rollback()
+	var count int
+	if err = tx.Get(&count, "SELECT COUNT(*) FROM `isu` WHERE `jia_isu_uuid` = ?", jiaIsuUUID); err != nil {
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	if count == 0 {
+		return c.String(http.StatusNotFound, "not found: isu")
+	}
+
+	valuePlaceholders := make([]string, 0, len(req))
+	args := make([]interface{}, 0, len(req)*5)
+	for _, cond := range req {
+		if !isValidConditionFormat(cond.Condition) {
+			return c.String(http.StatusBadRequest, "bad request body")
+		}
+		valuePlaceholders = append(valuePlaceholders, "(?, ?, ?, ?, ?)")
+		args = append(args, jiaIsuUUID, time.Unix(cond.Timestamp, 0), cond.IsSitting, cond.Condition, cond.Message)
+	}
+	_, err = tx.Exec(
+		"INSERT INTO `isu_condition` (`jia_isu_uuid`, `timestamp`, `is_sitting`, `condition`, `message`) VALUES "+strings.Join(valuePlaceholders, ","),
+		args...,
+	)
+	if err != nil {
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	if err = tx.Commit(); err != nil {
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	invalidateTrendCache()
 	return c.NoContent(http.StatusAccepted)
 }
 
