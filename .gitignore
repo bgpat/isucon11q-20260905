@@ -31,3 +31,6 @@
 !/ops
 /ops/*
 !/ops/goal-score-guard.sh
+!/ops/benchmark-report.py
+!/ops/benchmark_sql.py
+!/ops/test_benchmark_report.py
