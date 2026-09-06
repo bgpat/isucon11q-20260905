@@ -71,6 +71,28 @@ func TestGraphCacheInvalidateWindow(t *testing.T) {
 	}
 }
 
+func TestInvalidateGraphCacheFromInsertArgs(t *testing.T) {
+	invalidateGraphCache()
+	t.Cleanup(invalidateGraphCache)
+
+	start := time.Unix(1628521200, 0)
+	key := graphCacheKey{jiaUserID: "u", jiaIsuUUID: "isu", startUnix: start.Unix()}
+	other := graphCacheKey{jiaUserID: "u", jiaIsuUUID: "keep", startUnix: start.Unix()}
+	graphCacheSet(key, []byte("a"))
+	graphCacheSet(other, []byte("b"))
+
+	invalidateGraphCacheFromInsertArgs([]interface{}{
+		"isu", start.Add(time.Hour), false, "cond", "m",
+		"isu", start.Add(2 * time.Hour), true, "cond", "m",
+	})
+	if _, ok := graphCacheGet(key); ok {
+		t.Fatal("insert args in the window should invalidate")
+	}
+	if _, ok := graphCacheGet(other); !ok {
+		t.Fatal("other uuid should remain")
+	}
+}
+
 func TestMarshalPrettyJSONMatchesWriteJSON(t *testing.T) {
 	res := []GraphResponse{
 		{StartAt: 0, EndAt: 3600, Data: nil, ConditionTimestamps: []int64{}},

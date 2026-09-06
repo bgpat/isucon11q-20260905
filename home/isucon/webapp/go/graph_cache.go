@@ -32,6 +32,21 @@ func invalidateGraphCache() {
 	graphCache.Unlock()
 }
 
+func invalidateGraphCacheFromInsertArgs(args []interface{}) {
+	byUUID := make(map[string][]time.Time)
+	for i := 0; i+1 < len(args); i += 5 {
+		uuid, okUUID := args[i].(string)
+		ts, okTS := args[i+1].(time.Time)
+		if !okUUID || !okTS || uuid == "" {
+			continue
+		}
+		byUUID[uuid] = append(byUUID[uuid], ts)
+	}
+	for uuid, timestamps := range byUUID {
+		invalidateGraphCacheForConditions(uuid, timestamps)
+	}
+}
+
 func invalidateGraphCacheForConditions(jiaIsuUUID string, timestamps []time.Time) {
 	if len(timestamps) == 0 {
 		return
