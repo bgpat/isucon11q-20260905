@@ -74,6 +74,8 @@ var (
 			return new(bytes.Buffer)
 		},
 	}
+	// 存在する jia_isu_uuid だけを持つ正のキャッシュ。未ヒット（404）は載せない。
+	isuUUIDCache sync.Map
 )
 
 func invalidateTrendCache() {
@@ -81,6 +83,25 @@ func invalidateTrendCache() {
 	trendCache.valid = false
 	trendCache.response = nil
 	trendCache.Unlock()
+}
+
+func rememberIsuUUID(jiaIsuUUID string) {
+	isuUUIDCache.Store(jiaIsuUUID, struct{}{})
+}
+
+func invalidateIsuUUIDCache() {
+	isuUUIDCache.Range(func(key, _ interface{}) bool {
+		isuUUIDCache.Delete(key)
+		return true
+	})
+}
+
+func buildIsuConditionInsertValues(n int) string {
+	placeholders := make([]string, n)
+	for i := 0; i < n; i++ {
+		placeholders[i] = "(?, ?, ?, ?, ?)"
+	}
+	return strings.Join(placeholders, ",")
 }
 
 type sessionCacheEntry struct {
@@ -524,6 +545,7 @@ func postInitialize(c echo.Context) error {
 	}
 	invalidateTrendCache()
 	invalidateSessionCache()
+	invalidateIsuUUIDCache()
 	if err := os.RemoveAll(isuIconCacheDir); err != nil {
 		c.Logger().Errorf("failed to clear icon cache: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -778,6 +800,8 @@ func postIsu(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	// activate 中に condition が来る前に、同じプロセスでは存在確認 SELECT を省略する。
+	rememberIsuUUID(jiaIsuUUID)
 
 	targetURL := getJIAServiceURL(db) + "/api/activate"
 	body := JIAServiceRequest{postIsuConditionTargetBaseURL, jiaIsuUUID}
@@ -1484,27 +1508,31 @@ func postIsuCondition(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "bad request body")
 	}
 
-	// ISU の存在確認と登録を 1 ステートメントにまとめる。以前の
-	// SELECT -> INSERT -> COMMIT は、受理した要求ごとに3回のDB往復を
-	// 発生させていた。INSERT ... SELECT は autocommit で原子的に実行される。
-	valueSelects := make([]string, 0, len(req))
 	args := make([]interface{}, 0, len(req)*5)
-	for i, cond := range req {
+	for _, cond := range req {
 		if !isValidConditionFormat(cond.Condition) {
 			return c.String(http.StatusBadRequest, "bad request body")
 		}
-		if i == 0 {
-			valueSelects = append(valueSelects, "SELECT ? AS jia_isu_uuid, ? AS timestamp, ? AS is_sitting, ? AS condition_text, ? AS message")
-		} else {
-			valueSelects = append(valueSelects, "SELECT ?, ?, ?, ?, ?")
-		}
 		args = append(args, jiaIsuUUID, time.Unix(cond.Timestamp, 0), cond.IsSitting, cond.Condition, cond.Message)
 	}
+
+	// 正の uuid キャッシュに無ければ UNIQUE で 1 回だけ確認する。404 はキャッシュしない。
+	if _, ok := isuUUIDCache.Load(jiaIsuUUID); !ok {
+		var exists int
+		err := db.Get(&exists, "SELECT 1 FROM `isu` WHERE `jia_isu_uuid` = ? LIMIT 1", jiaIsuUUID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return c.String(http.StatusNotFound, "not found: isu")
+		}
+		if err != nil {
+			c.Logger().Errorf("db error: %v", err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		rememberIsuUUID(jiaIsuUUID)
+	}
+
 	result, err := db.Exec(
-		"INSERT INTO `isu_condition` (`jia_isu_uuid`, `timestamp`, `is_sitting`, `condition`, `message`) "+
-			"SELECT values_to_insert.jia_isu_uuid, values_to_insert.timestamp, values_to_insert.is_sitting, values_to_insert.condition_text, values_to_insert.message "+
-			"FROM ("+strings.Join(valueSelects, " UNION ALL ")+") AS values_to_insert "+
-			"INNER JOIN `isu` ON `isu`.`jia_isu_uuid` = values_to_insert.jia_isu_uuid",
+		"INSERT INTO `isu_condition` (`jia_isu_uuid`, `timestamp`, `is_sitting`, `condition`, `message`) VALUES "+
+			buildIsuConditionInsertValues(len(req)),
 		args...,
 	)
 	if err != nil {
@@ -1515,9 +1543,6 @@ func postIsuCondition(c echo.Context) error {
 	if err != nil {
 		c.Logger().Errorf("db result error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
-	}
-	if inserted == 0 {
-		return c.String(http.StatusNotFound, "not found: isu")
 	}
 	if inserted != int64(len(req)) {
 		c.Logger().Errorf("unexpected inserted condition count: got=%d want=%d", inserted, len(req))
