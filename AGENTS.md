@@ -175,6 +175,14 @@ default branch で実行したベンチマークは、ベースライン、比�
 
 Pull Request が default branch にマージされた後も、ベンチマークを実行した場合は同じルールで Release を作成する。Release には変更内容の要約、関連 Issue へのリンク、関連 Pull Request へのリンク、必要に応じてベンチマーク結果や既知の問題を記載する。
 
+## 継続目標の終了ガード
+
+スコア目標を持つ継続作業では、`final` を送る直前に必ず
+`ops/goal-score-guard.sh --issue <Issue番号>` を実行する。目標 Issue 本文には
+`goal-score: <整数>` を記載する。終了コード 0 と
+`GOAL_ACHIEVED` が確認できるまで、`final` で作業完了を宣言せず、次の
+計測・分析・Issue・実装・Pull Request・比較計測のループを継続する。
+
 ## 一回限りの作業
 
 一度だけ実行する作業は、実行手順と確認事項を `tasks/` 以下の Markdown ファイルに記録する。
