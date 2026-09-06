@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -68,6 +69,36 @@ func TestGraphCacheInvalidateWindow(t *testing.T) {
 	invalidateGraphCacheForConditions("isu", []time.Time{start.Add(24*time.Hour - time.Second)})
 	if _, ok := graphCacheGet(key); ok {
 		t.Fatal("timestamp last second of window should invalidate")
+	}
+}
+
+func TestGraphCacheInvalidateSkipsUnrelatedUUIDs(t *testing.T) {
+	invalidateGraphCache()
+	t.Cleanup(invalidateGraphCache)
+
+	start := time.Unix(1628521200, 0)
+	target := graphCacheKey{jiaUserID: "u", jiaIsuUUID: "target", startUnix: start.Unix()}
+	graphCacheSet(target, []byte("t"))
+	others := make([]graphCacheKey, 200)
+	for i := range others {
+		others[i] = graphCacheKey{jiaUserID: "u", jiaIsuUUID: fmt.Sprintf("other-%d", i), startUnix: start.Unix()}
+		graphCacheSet(others[i], []byte("o"))
+	}
+
+	invalidateGraphCacheForConditions("target", []time.Time{start})
+	if _, ok := graphCacheGet(target); ok {
+		t.Fatal("target should invalidate")
+	}
+	for _, key := range others {
+		if _, ok := graphCacheGet(key); !ok {
+			t.Fatalf("%s should remain", key.jiaIsuUUID)
+		}
+	}
+	graphCache.Lock()
+	_, hasIndex := graphCache.byUUID["target"]
+	graphCache.Unlock()
+	if hasIndex {
+		t.Fatal("empty uuid index should be removed")
 	}
 }
 

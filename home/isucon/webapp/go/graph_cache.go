@@ -23,12 +23,22 @@ func graphCacheSet(key graphCacheKey, body []byte) {
 	if graphCache.entries == nil {
 		graphCache.entries = make(map[graphCacheKey][]byte)
 	}
+	if graphCache.byUUID == nil {
+		graphCache.byUUID = make(map[string]map[graphCacheKey]struct{})
+	}
 	graphCache.entries[key] = stored
+	index := graphCache.byUUID[key.jiaIsuUUID]
+	if index == nil {
+		index = make(map[graphCacheKey]struct{})
+		graphCache.byUUID[key.jiaIsuUUID] = index
+	}
+	index[key] = struct{}{}
 }
 
 func invalidateGraphCache() {
 	graphCache.Lock()
 	graphCache.entries = nil
+	graphCache.byUUID = nil
 	graphCache.Unlock()
 }
 
@@ -53,20 +63,22 @@ func invalidateGraphCacheForConditions(jiaIsuUUID string, timestamps []time.Time
 	}
 	graphCache.Lock()
 	defer graphCache.Unlock()
-	if len(graphCache.entries) == 0 {
+	keys := graphCache.byUUID[jiaIsuUUID]
+	if len(keys) == 0 {
 		return
 	}
-	for key := range graphCache.entries {
-		if key.jiaIsuUUID != jiaIsuUUID {
-			continue
-		}
+	for key := range keys {
 		start := time.Unix(key.startUnix, 0)
 		end := start.Add(24 * time.Hour)
 		for _, ts := range timestamps {
 			if !ts.Before(start) && ts.Before(end) {
 				delete(graphCache.entries, key)
+				delete(keys, key)
 				break
 			}
 		}
+	}
+	if len(keys) == 0 {
+		delete(graphCache.byUUID, jiaIsuUUID)
 	}
 }

@@ -90,6 +90,7 @@ var (
 	graphCache    struct {
 		sync.Mutex
 		entries map[graphCacheKey][]byte
+		byUUID  map[string]map[graphCacheKey]struct{}
 	}
 )
 
