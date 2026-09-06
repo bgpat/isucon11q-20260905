@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -41,6 +42,7 @@ const (
 	mysqlErrNumDuplicateEntry   = 1062
 	sessionCacheTTL             = 30 * time.Second
 	sessionCacheMaxEntries      = 10000
+	dropConditionLogIdle        = 10 * time.Second
 	conditionLevelInfo          = "info"
 	conditionLevelWarning       = "warning"
 	conditionLevelCritical      = "critical"
@@ -67,6 +69,9 @@ var (
 		entries     map[string]sessionCacheEntry
 		nextCleanup time.Time
 	}
+	dropConditionPending uint64
+	dropConditionTotal   uint64
+	dropConditionLogger  echo.Logger
 )
 
 func invalidateTrendCache() {
@@ -360,6 +365,8 @@ func main() {
 	e := echo.New()
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
+	dropConditionLogger = e.Logger
+	startDropConditionLogFlusher()
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
@@ -1367,13 +1374,47 @@ func getTrend(c echo.Context) error {
 	return c.JSON(http.StatusOK, res)
 }
 
+func noteDroppedIsuCondition() {
+	atomic.AddUint64(&dropConditionPending, 1)
+	atomic.AddUint64(&dropConditionTotal, 1)
+}
+
+func startDropConditionLogFlusher() {
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		var lastTotal uint64
+		idle := time.Duration(0)
+		for range ticker.C {
+			total := atomic.LoadUint64(&dropConditionTotal)
+			if total != lastTotal {
+				lastTotal = total
+				idle = 0
+				continue
+			}
+			idle += time.Second
+			if idle < dropConditionLogIdle {
+				continue
+			}
+			n := atomic.SwapUint64(&dropConditionPending, 0)
+			if n == 0 {
+				continue
+			}
+			if dropConditionLogger != nil {
+				dropConditionLogger.Warnf("drop post isu condition request: flushed=%d total=%d", n, total)
+			}
+			idle = 0
+		}
+	}()
+}
+
 // POST /api/condition/:jia_isu_uuid
 // ISUからのコンディションを受け取る
 func postIsuConditionLegacy(c echo.Context) error {
 	// TODO: 一定割合リクエストを落としてしのぐようにしたが、本来は全量さばけるようにすべき
 	dropProbability := 0.9
 	if rand.Float64() <= dropProbability {
-		c.Logger().Warnf("drop post isu condition request")
+		noteDroppedIsuCondition()
 		return c.NoContent(http.StatusAccepted)
 	}
 
@@ -1440,7 +1481,7 @@ func postIsuCondition(c echo.Context) error {
 	// 既存の暫定的な drop 挙動は変更しない。DB 書き込みだけを一括化する。
 	dropProbability := 0.9
 	if rand.Float64() <= dropProbability {
-		c.Logger().Warnf("drop post isu condition request")
+		noteDroppedIsuCondition()
 		return c.NoContent(http.StatusAccepted)
 	}
 
