@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	conditionCollectWindow  = 20 * time.Millisecond
+	conditionCollectWindow  = 50 * time.Millisecond
 	conditionResponseBudget = 80 * time.Millisecond
 	conditionInsertReserve  = 30 * time.Millisecond
 	conditionBatchMaxRows   = 500
