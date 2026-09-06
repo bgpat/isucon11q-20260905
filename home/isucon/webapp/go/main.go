@@ -94,13 +94,6 @@ var (
 	}
 )
 
-func invalidateTrendCache() {
-	trendCache.Lock()
-	trendCache.valid = false
-	trendCache.response = nil
-	trendCache.Unlock()
-}
-
 func rememberIsuUUID(jiaIsuUUID string) {
 	isuUUIDCache.Store(jiaIsuUUID, struct{}{})
 }
@@ -1466,12 +1459,14 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
-	// キャッシュミス時のDB再計算を1リクエストに限定する。
+	if res, ok := loadTrendCacheIfUsable(); ok {
+		return writeJSON(c, http.StatusOK, res)
+	}
+
 	trendCache.Lock()
 	defer trendCache.Unlock()
-	if trendCache.valid {
-		res := trendCache.response
-		return writeJSON(c, http.StatusOK, res)
+	if trendCacheUsableLocked() {
+		return writeJSON(c, http.StatusOK, trendCache.response)
 	}
 
 	characterList := []Isu{}
@@ -1567,6 +1562,7 @@ func getTrend(c echo.Context) error {
 	}
 	trendCache.response = res
 	trendCache.valid = true
+	noteTrendCacheRecomputed()
 
 	return writeJSON(c, http.StatusOK, res)
 }
@@ -1668,7 +1664,7 @@ func postIsuConditionLegacy(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	invalidateTrendCache()
+	markTrendCacheDirty()
 
 	return c.NoContent(http.StatusAccepted)
 }
@@ -1722,7 +1718,7 @@ func postIsuCondition(c echo.Context) error {
 		c.Logger().Errorf("valkey error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	invalidateTrendCache()
+	markTrendCacheDirty()
 	invalidateGraphCacheForConditions(jiaIsuUUID, timestamps)
 	return c.NoContent(http.StatusAccepted)
 }
