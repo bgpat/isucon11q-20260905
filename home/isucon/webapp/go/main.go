@@ -877,7 +877,7 @@ func postIsu(c echo.Context) error {
 	var isu Isu
 	err = db.Get(
 		&isu,
-		"SELECT * FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
+		"SELECT `id`, `jia_isu_uuid`, `name`, `character` FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
 		jiaUserID, jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
