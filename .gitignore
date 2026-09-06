@@ -21,6 +21,20 @@
 !/etc/systemd/system
 /etc/systemd/system/*
 !/etc/systemd/system/isucondition.go.service
+# MariaDB 11.4 更新の原本・APT repository・署名鍵
+!/etc/apt
+/etc/apt/*
+!/etc/apt/sources.list.d
+/etc/apt/sources.list.d/*
+!/etc/apt/sources.list.d/mariadb-11.4.list
+!/etc/apt/keyrings
+/etc/apt/keyrings/*
+!/etc/apt/keyrings/mariadb-keyring.asc
+!/etc/mysql
+/etc/mysql/*
+!/etc/mysql/mariadb.conf.d
+/etc/mysql/mariadb.conf.d/*
+!/etc/mysql/mariadb.conf.d/50-server.cnf
 # 継続目標の終了ガード
 !/ops
 /ops/*
