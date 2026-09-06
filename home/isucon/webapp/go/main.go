@@ -69,6 +69,7 @@ var (
 		sync.RWMutex
 		response []TrendResponse
 		valid    bool
+		gen      uint64
 	}
 	sessionCache struct {
 		sync.Mutex
@@ -1463,11 +1464,12 @@ func getTrend(c echo.Context) error {
 		return writeJSON(c, http.StatusOK, res)
 	}
 
-	trendCache.Lock()
-	defer trendCache.Unlock()
-	if trendCacheUsableLocked() {
-		return writeJSON(c, http.StatusOK, trendCache.response)
+	trendComputeMu.Lock()
+	defer trendComputeMu.Unlock()
+	if res, ok := loadTrendCacheIfUsable(); ok {
+		return writeJSON(c, http.StatusOK, res)
 	}
+	gen, _, _ := snapshotTrendCache()
 
 	characterList := []Isu{}
 	err := db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
@@ -1560,10 +1562,7 @@ func getTrend(c echo.Context) error {
 			Critical:  critical[character.Character],
 		})
 	}
-	trendCache.response = res
-	trendCache.valid = true
-	noteTrendCacheRecomputed()
-
+	storeTrendCache(gen, res)
 	return writeJSON(c, http.StatusOK, res)
 }
 
