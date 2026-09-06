@@ -81,6 +81,10 @@ var (
 	}
 	// 存在する jia_isu_uuid だけを持つ正のキャッシュ。未ヒット（404）は載せない。
 	isuUUIDCache sync.Map
+	graphCache   struct {
+		sync.Mutex
+		entries map[graphCacheKey][]byte
+	}
 )
 
 func invalidateTrendCache() {
@@ -176,21 +180,34 @@ func invalidateSessionCache() {
 // 同じバイト列を書く。json.Encoder.SetIndent の compact marshal + Indent 再パースを避け、
 // json/v2 で 2 スペース indent を1パスで出す。末尾改行は Encoder.Encode に合わせる。
 func writeJSON(c echo.Context, code int, v interface{}) error {
+	body, err := marshalPrettyJSON(v)
+	if err != nil {
+		return err
+	}
+	return writeJSONBytes(c, code, body)
+}
+
+func marshalPrettyJSON(v interface{}) ([]byte, error) {
 	buf := prettyJSONBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer prettyJSONBufPool.Put(buf)
 
 	if err := jsonv2.MarshalWrite(buf, v, json.DefaultOptionsV1(), jsontext.WithIndent("  ")); err != nil {
-		return err
+		return nil, err
 	}
 	buf.WriteByte('\n')
+	out := make([]byte, buf.Len())
+	copy(out, buf.Bytes())
+	return out, nil
+}
 
+func writeJSONBytes(c echo.Context, code int, body []byte) error {
 	res := c.Response()
 	if res.Header().Get(echo.HeaderContentType) == "" {
 		res.Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
 	}
 	res.WriteHeader(code)
-	_, err := res.Write(buf.Bytes())
+	_, err := res.Write(body)
 	return err
 }
 
@@ -553,6 +570,7 @@ func postInitialize(c echo.Context) error {
 	invalidateTrendCache()
 	invalidateSessionCache()
 	invalidateIsuUUIDCache()
+	invalidateGraphCache()
 	if err := os.RemoveAll(isuIconCacheDir); err != nil {
 		c.Logger().Errorf("failed to clear icon cache: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -967,42 +985,38 @@ func getIsuGraph(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "bad format: datetime")
 	}
 	date := time.Unix(datetimeInt64, 0).Truncate(time.Hour)
-
-	tx, err := db.Beginx()
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
+	cacheKey := graphCacheKey{jiaUserID: jiaUserID, jiaIsuUUID: jiaIsuUUID, startUnix: date.Unix()}
+	if body, ok := graphCacheGet(cacheKey); ok {
+		return writeJSONBytes(c, http.StatusOK, body)
 	}
-	defer tx.Rollback()
 
-	var count int
-	err = tx.Get(&count, "SELECT COUNT(*) FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
+	var exists int
+	err = db.Get(&exists, "SELECT 1 FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ? LIMIT 1",
 		jiaUserID, jiaIsuUUID)
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	if count == 0 {
+	if errors.Is(err, sql.ErrNoRows) {
 		return c.String(http.StatusNotFound, "not found: isu")
 	}
+	if err != nil {
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
 
-	res, err := generateIsuGraphResponse(tx, jiaIsuUUID, date)
+	res, err := generateIsuGraphResponse(db, jiaIsuUUID, date)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	err = tx.Commit()
+	body, err := marshalPrettyJSON(res)
 	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
+		return err
 	}
-
-	return writeJSON(c, http.StatusOK, res)
+	graphCacheSet(cacheKey, body)
+	return writeJSONBytes(c, http.StatusOK, body)
 }
 
 // グラフのデータ点を一日分生成
-func generateIsuGraphResponse(tx *sqlx.Tx, jiaIsuUUID string, graphDate time.Time) ([]GraphResponse, error) {
+func generateIsuGraphResponse(q sqlx.Queryer, jiaIsuUUID string, graphDate time.Time) ([]GraphResponse, error) {
 	endTime := graphDate.Add(24 * time.Hour)
 	dataPoints := []GraphDataPointWithInfo{}
 	conditionsInThisHour := []IsuCondition{}
@@ -1010,10 +1024,11 @@ func generateIsuGraphResponse(tx *sqlx.Tx, jiaIsuUUID string, graphDate time.Tim
 	var startTimeInThisHour time.Time
 	var condition IsuCondition
 
-	rows, err := tx.Queryx("SELECT `timestamp`, `is_sitting`, `condition` FROM `isu_condition` WHERE `jia_isu_uuid` = ? AND `timestamp` >= ? AND `timestamp` < ? ORDER BY `timestamp` ASC", jiaIsuUUID, graphDate, endTime)
+	rows, err := q.Queryx("SELECT `timestamp`, `is_sitting`, `condition` FROM `isu_condition` WHERE `jia_isu_uuid` = ? AND `timestamp` >= ? AND `timestamp` < ? ORDER BY `timestamp` ASC", jiaIsuUUID, graphDate, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("db error: %v", err)
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		err = rows.StructScan(&condition)
@@ -1550,11 +1565,14 @@ func postIsuCondition(c echo.Context) error {
 	}
 
 	args := make([]interface{}, 0, len(req)*5)
+	timestamps := make([]time.Time, 0, len(req))
 	for _, cond := range req {
 		if !isValidConditionFormat(cond.Condition) {
 			return c.String(http.StatusBadRequest, "bad request body")
 		}
-		args = append(args, jiaIsuUUID, time.Unix(cond.Timestamp, 0), cond.IsSitting, cond.Condition, cond.Message)
+		ts := time.Unix(cond.Timestamp, 0)
+		timestamps = append(timestamps, ts)
+		args = append(args, jiaIsuUUID, ts, cond.IsSitting, cond.Condition, cond.Message)
 	}
 
 	// 正の uuid キャッシュに無ければ UNIQUE で 1 回だけ確認する。404 はキャッシュしない。
@@ -1590,6 +1608,7 @@ func postIsuCondition(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	invalidateTrendCache()
+	invalidateGraphCacheForConditions(jiaIsuUUID, timestamps)
 	return c.NoContent(http.StatusAccepted)
 }
 
