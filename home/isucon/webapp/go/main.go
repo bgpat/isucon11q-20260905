@@ -39,6 +39,8 @@ const (
 	isuIconInternalPath         = "/_isucondition_icon_cache/"
 	defaultJIAServiceURL        = "http://localhost:5000"
 	mysqlErrNumDuplicateEntry   = 1062
+	sessionCacheTTL             = 30 * time.Second
+	sessionCacheMaxEntries      = 10000
 	conditionLevelInfo          = "info"
 	conditionLevelWarning       = "warning"
 	conditionLevelCritical      = "critical"
@@ -60,6 +62,11 @@ var (
 		response []TrendResponse
 		valid    bool
 	}
+	sessionCache struct {
+		sync.Mutex
+		entries     map[string]sessionCacheEntry
+		nextCleanup time.Time
+	}
 )
 
 func invalidateTrendCache() {
@@ -67,6 +74,69 @@ func invalidateTrendCache() {
 	trendCache.valid = false
 	trendCache.response = nil
 	trendCache.Unlock()
+}
+
+type sessionCacheEntry struct {
+	jiaUserID string
+	expiresAt time.Time
+}
+
+func sessionCookieValue(r *http.Request) (string, bool) {
+	cookie, err := r.Cookie(sessionName)
+	if err != nil || cookie.Value == "" {
+		return "", false
+	}
+	return cookie.Value, true
+}
+
+func getCachedSessionUserID(cookieValue string) (string, bool) {
+	now := time.Now()
+	sessionCache.Lock()
+	defer sessionCache.Unlock()
+
+	entry, ok := sessionCache.entries[cookieValue]
+	if !ok || !entry.expiresAt.After(now) {
+		if ok {
+			delete(sessionCache.entries, cookieValue)
+		}
+		return "", false
+	}
+	return entry.jiaUserID, true
+}
+
+func cacheSessionUserID(cookieValue, jiaUserID string) {
+	now := time.Now()
+	sessionCache.Lock()
+	defer sessionCache.Unlock()
+
+	if sessionCache.entries == nil || len(sessionCache.entries) >= sessionCacheMaxEntries {
+		sessionCache.entries = make(map[string]sessionCacheEntry)
+	}
+	if now.After(sessionCache.nextCleanup) {
+		for key, entry := range sessionCache.entries {
+			if !entry.expiresAt.After(now) {
+				delete(sessionCache.entries, key)
+			}
+		}
+		sessionCache.nextCleanup = now.Add(sessionCacheTTL)
+	}
+	sessionCache.entries[cookieValue] = sessionCacheEntry{
+		jiaUserID: jiaUserID,
+		expiresAt: now.Add(sessionCacheTTL),
+	}
+}
+
+func deleteCachedSessionUserID(cookieValue string) {
+	sessionCache.Lock()
+	delete(sessionCache.entries, cookieValue)
+	sessionCache.Unlock()
+}
+
+func invalidateSessionCache() {
+	sessionCache.Lock()
+	sessionCache.entries = nil
+	sessionCache.nextCleanup = time.Time{}
+	sessionCache.Unlock()
 }
 
 func isuIconCachePath(jiaUserID, jiaIsuUUID string) string {
@@ -349,6 +419,13 @@ func getSession(r *http.Request) (*sessions.Session, error) {
 }
 
 func getUserIDFromSession(c echo.Context) (string, int, error) {
+	cookieValue, hasCookie := sessionCookieValue(c.Request())
+	if hasCookie {
+		if jiaUserID, ok := getCachedSessionUserID(cookieValue); ok {
+			return jiaUserID, 0, nil
+		}
+	}
+
 	session, err := getSession(c.Request())
 	if err != nil {
 		return "", http.StatusInternalServerError, fmt.Errorf("failed to get session: %v", err)
@@ -369,6 +446,9 @@ func getUserIDFromSession(c echo.Context) (string, int, error) {
 
 	if count == 0 {
 		return "", http.StatusUnauthorized, fmt.Errorf("not found: user")
+	}
+	if hasCookie {
+		cacheSessionUserID(cookieValue, jiaUserID)
 	}
 
 	return jiaUserID, 0, nil
@@ -414,6 +494,7 @@ func postInitialize(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	invalidateTrendCache()
+	invalidateSessionCache()
 	if err := os.RemoveAll(isuIconCacheDir); err != nil {
 		c.Logger().Errorf("failed to clear icon cache: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -505,6 +586,9 @@ func postSignout(c echo.Context) error {
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
+	}
+	if cookieValue, ok := sessionCookieValue(c.Request()); ok {
+		deleteCachedSessionUserID(cookieValue)
 	}
 
 	return c.NoContent(http.StatusOK)
