@@ -28,7 +28,10 @@ def profile(path, cumulative):
         fields = line.split()
         if len(fields) >= 6 and fields[1].endswith('%'):
             rows.append([' '.join(fields[5:]), fields[0], fields[1], fields[3], fields[4]])
-    return dict(raw=raw, rows=rows)
+    metadata = [line for line in raw.splitlines() if line.startswith(('Time:', 'Duration:'))]
+    if len(metadata) != 2:
+        raise ValueError('profile時刻・期間・総sampleが見つからない')
+    return dict(raw=raw, rows=rows, metadata=metadata)
 
 
 def cpu(path):
@@ -46,8 +49,23 @@ def cpu(path):
     for key, values in groups.items():
         items = sorted(values.items())
         seconds = sum((b[0]-a[0])*(a[1]+b[1])/2 for a, b in zip(items, items[1:]))
-        result[key] = dict(seconds=seconds, mean_cores=seconds/(items[-1][0]-items[0][0]) if len(items)>1 else None)
+        result[key] = dict(seconds=seconds, mean_cores=seconds/(items[-1][0]-items[0][0]) if len(items)>1 else None,
+                           start=items[0][0] if items else None, end=items[-1][0] if items else None)
     return result
+
+
+def final_score(log):
+    load_end = log.rfind('<=== LOAD END')
+    finish = log.rfind('<=== sendResult finish')
+    if load_end < 0 or finish < load_end:
+        raise ValueError('ベンチ未完走: LOAD END/sendResult finishが必要')
+    scores = list(re.finditer(r'score:\s*(\d+)\((\d+)\s*-\s*(\d+)\)\s*:\s*(\w+)', log))
+    if not scores or not load_end < scores[-1].start() < finish:
+        raise ValueError('LOAD END後の最終scoreが見つからない')
+    score, gross, penalty, state = scores[-1].groups()
+    if int(score) != int(gross) - int(penalty):
+        raise ValueError('最終score内訳が不一致')
+    return int(score), state
 
 
 def summarize(path):
@@ -57,9 +75,9 @@ def summarize(path):
     end = min(start + 59, int(timing['end']))
     if end <= start:
         raise ValueError('LOAD窓が空')
-    scores = re.findall(r'score:\s*(\d+)\([^\n]*?\)\s*:\s*(\w+)', (path/'bench.log').read_text())
-    if not scores:
-        raise ValueError('最終scoreが見つからない: ' + str(path))
+    score, state = final_score((path/'bench.log').read_text())
+    if timing.get('returncode', 0) != 0:
+        raise ValueError('ベンチ終了コードが非0')
     def status(name):
         return {k: int(v) for k, v in (line.split() for line in (path/name).read_text().splitlines())}
     before, after = status('db-before.txt'), status('db-after.txt')
@@ -68,7 +86,10 @@ def summarize(path):
         flat = pool.submit(profile, path/'cpu.pprof', False)
         cum = pool.submit(profile, path/'cpu.pprof', True)
         metrics = pool.submit(cpu, path/'prometheus-cpu.json')
-        result = dict(commit=timing['commit'], load=timing['load'], end=timing['end'], sql_window=[start,end], score=int(scores[-1][0]), status=scores[-1][1], sql=sql.result(), flat=flat.result(), cumulative=cum.result(), cpu=metrics.result(), db_delta={k:after[k]-v for k,v in before.items() if not k.startswith('Threads_')})
+        result = dict(commit=timing['commit'], load=timing['load'], end=timing['end'], sql_window=[start,end], score=score, status=state, sql=sql.result(), flat=flat.result(), cumulative=cum.result(), cpu=metrics.result(), db_delta={k:after[k]-v for k,v in before.items() if not k.startswith('Threads_')})
+        for key, values in result['cpu'].items():
+            if values['start'] is None or values['start'] < timing['load'] - 1 or values['end'] > timing['end'] + 1:
+                raise ValueError('CPU時系列がLOAD窓の外: ' + key)
         result['analysis_seconds'] = time.monotonic() - started
         return result
 
@@ -106,11 +127,11 @@ def main():
              'Query_timeは待機を含む経過時間でCPU時間ではない。pprofの比率は総CPU sampleが分母。flatは関数自身、cumulativeは子孫を含み重複するため合計不可。CPUは保存済みPrometheus rate系列の台形積分による推定値。DB差分には初期化が含まれる。']
     for label,data in [('baseline',baseline),('candidate',candidate)]:
         parts += ['### '+label+' 計測条件',json.dumps({k:data[k] for k in ('load','end','sql_window','commit')},ensure_ascii=False),
-                  table(['プロセス(instance/group)','推定CPU秒','平均core'],[[k,f"{v['seconds']:.6f}",v['mean_cores']] for k,v in sorted(data['cpu'].items(),key=lambda item:-item[1]['seconds'])[:20]]),
+                  table(['プロセス(instance/group)','推定CPU秒','平均core','開始epoch','終了epoch'],[[k,f"{v['seconds']:.6f}",v['mean_cores'],v['start'],v['end']] for k,v in sorted(data['cpu'].items(),key=lambda item:-item[1]['seconds'])[:20]]),
                   table(['DB指標','差分'],data['db_delta'].items()),'### '+label+' SQL top20',
-                  table(['順位','SQL','回数','Query合計s','平均ms','Lock合計s','Rows examined','Rows sent'],[[i,r['sql'],r['count'],f"{r['seconds']:.6f}",f"{r['seconds']/r['count']*1000:.6f}",f"{r['lock']:.6f}",r['examined'],r['sent']] for i,r in enumerate(data['sql'][:20],1)])]
+                  table(['順位','SQL','回数','Query合計s','平均ms','最大ms','Lock合計s','Rows examined','Rows sent'],[[i,r['sql'],r['count'],f"{r['seconds']:.6f}",f"{r['seconds']/r['count']*1000:.6f}",f"{r['max_seconds']*1000:.3f}",f"{r['lock']:.6f}",r['examined'],r['sent']] for i,r in enumerate(data['sql'][:20],1)])]
         for mode in ('flat','cumulative'):
-            parts += ['### '+label+' pprof '+mode+' top20',table(['順位','関数','flat CPU','flat比','cumulative CPU','cumulative比'],[[i,*row] for i,row in enumerate(data[mode]['rows'],1)])]
+            parts += ['### '+label+' pprof '+mode+' top20',' / '.join(data[mode]['metadata']),table(['順位','関数','flat CPU','flat比','cumulative CPU','cumulative比'],[[i,*row] for i,row in enumerate(data[mode]['rows'],1)])]
         regions = [row for row in data['cumulative']['rows'] if row[0].startswith('main.') or 'Syscall6' in row[0]]
         parts += ['### '+label+' 領域別候補（cumulative上位20から抽出）',table(['優先','代表経路','flat CPU','flat比','cumulative CPU','cumulative比','扱い'],[[i,*row,'実測。採否は下記判断を参照'] for i,row in enumerate(regions,1)])]
     parts += ['### 推測・仮説',args.hypothesis,'### 判断',args.decision]
@@ -124,11 +145,15 @@ def main():
                     archive.add(path/name,arcname=label+'/'+name)
         for name in ('report.md','metrics.json'):
             archive.add(args.output/name,arcname=name)
-    (args.output/'processing.json').write_text(json.dumps(dict(analysis_seconds=analyzed-started,compose_seconds=composed-analyzed,archive_seconds=time.monotonic()-composed,total_seconds=time.monotonic()-started,published=args.publish)))
+    processing = dict(analysis_seconds=analyzed-started,compose_seconds=composed-analyzed,archive_seconds=time.monotonic()-composed,total_seconds=time.monotonic()-started,status='prepared')
+    (args.output/'processing.json').write_text(json.dumps(processing))
     if args.publish:
         command('release-create',['gh','release','create',args.tag,'--repo',args.repo,'--target',candidate['commit'],'--title',f"#{args.pr}: {candidate['score']}点",'--notes-file',str(args.output/'report.md'),str(args.output/'assets.tar.gz'),str(args.output/'processing.json')])
         for kind,number in [('pr',args.pr),('issue',args.issue)]:
             command(kind+'-comment',['gh',kind,'comment',str(number),'--repo',args.repo,'--body-file',str(args.output/'report.md')])
+        processing.update(status='complete',total_seconds=time.monotonic()-started)
+        (args.output/'processing.json').write_text(json.dumps(processing))
+        command('release-timing-update',['gh','release','upload',args.tag,'--repo',args.repo,'--clobber',str(args.output/'processing.json')])
     print(json.dumps(dict(report=str(args.output/'report.md'),seconds=time.monotonic()-started,published=args.publish)))
 
 

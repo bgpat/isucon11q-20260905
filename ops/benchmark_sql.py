@@ -5,7 +5,7 @@ import re
 
 
 def analyze(path, start, end):
-    groups = collections.defaultdict(lambda: dict(count=0, seconds=0., lock=0., examined=0, sent=0))
+    groups = collections.defaultdict(lambda: dict(count=0, seconds=0., max_seconds=0., lock=0., examined=0, sent=0))
     current = None
 
     def finish():
@@ -21,6 +21,7 @@ def analyze(path, start, end):
         sql = re.sub(r'(\([^()]+\))(?:,\s*\1)+', r'\1 [repeated]', sql)
         group = groups[sql]
         group['count'] += 1
+        group['max_seconds'] = max(group['max_seconds'], current['seconds'])
         for key in ('seconds', 'lock', 'examined', 'sent'):
             group[key] += current[key]
 

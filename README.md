@@ -78,10 +78,18 @@ SQL/pprof/CPU を並列集計し、SQL/pprof top20、CPU・DB差分、比較comm
 SQL は LOAD 次整数秒から59秒（実際の終了秒まで）の同長窓で比較する。
 CPU は instance ごとに区別し、移動rateの積分による推定値として表示する。
 `processing.json` に並列集計全体・本文生成・圧縮の経過秒、既存 `timing.tsv` に全体とpprofを記録する。
+ベンチのLOAD END/sendResult完走と最終scoreの算術整合を検査する。CPU系列はLOAD窓±1秒を
+超える場合に停止し、本文にも保存範囲を表示する。pprofは時刻・期間・総CPU sampleを掲載する。
 機械集計は仮説・採否を決めない。レビュー後 `--hypothesis '仮説' --decision '判断と根拠'` を指定する。
 `--publish` を付けた場合だけ計測commitをtargetにRelease作成とasset添付、PR/Issueコメントを行う。
 既存Releaseを上書きせずエラーで停止する。公開が途中失敗した場合は作成済みReleaseを確認し、
 未完了のupload/commentのみ再実行する。再公開のためにタグを変えて同一計測を重複登録しない。
+公開前は `processing.json` のstatusがprepared、Releaseとコメント完了後だけcompleteとなる。
+
+承認画面で毎回異なるphase名がコマンド先頭に現れないよう、上記の外側timeラッパーは省略して
+`python3 ops/benchmark-report.py ...` を固定entrypointとして実行してもよい。処理別の内部計測は残る。
+公開時の許可は、この固定スクリプトの内容をレビューしたうえでスクリプトまでのprefixに対して
+申請できる。これは自動許可を保証せず、内部コマンドにも実行環境の承認規則が適用される。
 
 ```sh
 python3 -m unittest discover -s ops -p test_benchmark_report.py
