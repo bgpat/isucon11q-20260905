@@ -89,7 +89,8 @@ var (
 	iconFileCache sync.Map
 	graphCache    struct {
 		sync.Mutex
-		entries map[graphCacheKey][]byte
+		// jiaIsuUUID -> startUnix -> jiaUserID -> body
+		entries map[string]map[int64]map[string][]byte
 	}
 )
 
