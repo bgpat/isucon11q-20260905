@@ -53,6 +53,20 @@ func TestDefaultValkeyAddrUsesEnv(t *testing.T) {
 	}
 }
 
+func TestDefaultValkeyAddrUsesIsucon2Host(t *testing.T) {
+	t.Setenv("VALKEY_ADDR", "")
+	got := defaultValkeyAddr()
+	if hostnameIs(isucon2Hostname) {
+		if got != "127.0.0.1:6379" {
+			t.Fatalf("addr=%q", got)
+		}
+		return
+	}
+	if got != isucon2Hostname+":6379" {
+		t.Fatalf("addr=%q", got)
+	}
+}
+
 func TestConditionMembersAreUnique(t *testing.T) {
 	rec := conditionRecord{
 		Timestamp: time.Unix(1, 0),
