@@ -58,6 +58,7 @@ func flushIsuConditionRows(args []interface{}, rowCount int) error {
 		return fmt.Errorf("unexpected inserted condition count: got=%d want=%d", inserted, rowCount)
 	}
 	invalidateTrendCache()
+	invalidateGraphCacheFromInsertArgs(args)
 	return nil
 }
 
