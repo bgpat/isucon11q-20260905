@@ -582,6 +582,7 @@ func postInitialize(c echo.Context) error {
 	invalidateTrendCache()
 	invalidateSessionCache()
 	invalidateIsuUUIDCache()
+	invalidateIsuMetaCache()
 	invalidateGraphCache()
 	if err := os.RemoveAll(isuIconCacheDir); err != nil {
 		c.Logger().Errorf("failed to clear icon cache: %v", err)
@@ -712,19 +713,15 @@ func getIsuList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	isuList := []IsuListRow{}
-	err = db.Select(&isuList, `
-		SELECT isu.id, isu.jia_isu_uuid, isu.name, isu.character
-		FROM isu
-		WHERE isu.jia_user_id = ? ORDER BY isu.id DESC`, jiaUserID)
+	metas, err := listIsuMetaByUser(jiaUserID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	uuids := make([]string, 0, len(isuList))
-	for _, isu := range isuList {
-		uuids = append(uuids, isu.JIAIsuUUID)
+	uuids := make([]string, 0, len(metas))
+	for _, meta := range metas {
+		uuids = append(uuids, meta.JIAIsuUUID)
 	}
 	latestByUUID, err := getLatestConditionsFromValkey(c.Request().Context(), uuids)
 	if err != nil {
@@ -732,10 +729,10 @@ func getIsuList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	responseList := []GetIsuListResponse{}
-	for _, isu := range isuList {
+	responseList := make([]GetIsuListResponse, 0, len(metas))
+	for _, meta := range metas {
 		var formattedCondition *GetIsuConditionResponse
-		if latest, ok := latestByUUID[isu.JIAIsuUUID]; ok {
+		if latest, ok := latestByUUID[meta.JIAIsuUUID]; ok {
 			conditionLevel, err := calculateConditionLevel(latest.Condition)
 			if err != nil {
 				c.Logger().Error(err)
@@ -743,8 +740,8 @@ func getIsuList(c echo.Context) error {
 			}
 
 			formattedCondition = &GetIsuConditionResponse{
-				JIAIsuUUID:     isu.JIAIsuUUID,
-				IsuName:        isu.Name,
+				JIAIsuUUID:     meta.JIAIsuUUID,
+				IsuName:        meta.Name,
 				Timestamp:      latest.Timestamp.Unix(),
 				IsSitting:      latest.IsSitting,
 				Condition:      latest.Condition,
@@ -753,13 +750,13 @@ func getIsuList(c echo.Context) error {
 			}
 		}
 
-		res := GetIsuListResponse{
-			ID:                 isu.ID,
-			JIAIsuUUID:         isu.JIAIsuUUID,
-			Name:               isu.Name,
-			Character:          isu.Character,
-			LatestIsuCondition: formattedCondition}
-		responseList = append(responseList, res)
+		responseList = append(responseList, GetIsuListResponse{
+			ID:                 meta.ID,
+			JIAIsuUUID:         meta.JIAIsuUUID,
+			Name:               meta.Name,
+			Character:          meta.Character,
+			LatestIsuCondition: formattedCondition,
+		})
 	}
 
 	return writeJSON(c, http.StatusOK, responseList)
@@ -820,7 +817,7 @@ func postIsu(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Exec("INSERT INTO `isu`"+
+	insertRes, err := tx.Exec("INSERT INTO `isu`"+
 		"	(`jia_isu_uuid`, `name`, `image`, `jia_user_id`) VALUES (?, ?, ?, ?)",
 		jiaIsuUUID, isuName, image, jiaUserID)
 	if err != nil {
@@ -830,6 +827,11 @@ func postIsu(c echo.Context) error {
 			return c.String(http.StatusConflict, "duplicated: isu")
 		}
 
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	isuID, err := insertRes.LastInsertId()
+	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -889,14 +891,21 @@ func postIsu(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	var isu Isu
-	err = db.Get(
-		&isu,
-		"SELECT * FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
-		jiaUserID, jiaIsuUUID)
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
+	meta := isuMeta{
+		ID:         int(isuID),
+		JIAIsuUUID: jiaIsuUUID,
+		Name:       isuName,
+		Character:  isuFromJIA.Character,
+		JIAUserID:  jiaUserID,
+	}
+	rememberIsuMeta(meta)
+	isu := Isu{
+		ID:         meta.ID,
+		JIAIsuUUID: meta.JIAIsuUUID,
+		Name:       meta.Name,
+		Character:  meta.Character,
+		JIAUserID:  meta.JIAUserID,
+		Image:      image,
 	}
 
 	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
@@ -922,19 +931,21 @@ func getIsuID(c echo.Context) error {
 
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
-	var res Isu
-	err = db.Get(&res, "SELECT `id`, `jia_isu_uuid`, `name`, `character` FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
-		jiaUserID, jiaIsuUUID)
+	meta, ok, err := ownedIsuMeta(jiaIsuUUID, jiaUserID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return c.String(http.StatusNotFound, "not found: isu")
-		}
-
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	if !ok {
+		return c.String(http.StatusNotFound, "not found: isu")
+	}
 
-	return writeJSON(c, http.StatusOK, res)
+	return writeJSON(c, http.StatusOK, Isu{
+		ID:         meta.ID,
+		JIAIsuUUID: meta.JIAIsuUUID,
+		Name:       meta.Name,
+		Character:  meta.Character,
+	})
 }
 
 // GET /api/isu/:jia_isu_uuid/icon
@@ -1005,15 +1016,13 @@ func getIsuGraph(c echo.Context) error {
 		return writeJSONBytes(c, http.StatusOK, body)
 	}
 
-	var exists int
-	err = db.Get(&exists, "SELECT 1 FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ? LIMIT 1",
-		jiaUserID, jiaIsuUUID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return c.String(http.StatusNotFound, "not found: isu")
-	}
+	_, ok, err := ownedIsuMeta(jiaIsuUUID, jiaUserID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
+	}
+	if !ok {
+		return c.String(http.StatusNotFound, "not found: isu")
 	}
 
 	res, err := generateIsuGraphResponse(c.Request().Context(), jiaIsuUUID, date)
@@ -1228,19 +1237,15 @@ func getIsuConditions(c echo.Context) error {
 		startTime = time.Unix(startTimeInt64, 0)
 	}
 
-	var isuName string
-	err = db.Get(&isuName,
-		"SELECT name FROM `isu` WHERE `jia_isu_uuid` = ? AND `jia_user_id` = ?",
-		jiaIsuUUID, jiaUserID,
-	)
+	meta, ok, err := ownedIsuMeta(jiaIsuUUID, jiaUserID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return c.String(http.StatusNotFound, "not found: isu")
-		}
-
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	if !ok {
+		return c.String(http.StatusNotFound, "not found: isu")
+	}
+	isuName := meta.Name
 
 	conditionsResponse, err := getIsuConditionsFromValkey(c.Request().Context(), jiaIsuUUID, endTime, conditionLevel, startTime, conditionLimit, isuName)
 	if err != nil {
@@ -1674,18 +1679,16 @@ func postIsuCondition(c echo.Context) error {
 		timestamps = append(timestamps, ts)
 	}
 
-	// 正の uuid キャッシュに無ければ UNIQUE で 1 回だけ確認する。404 はキャッシュしない。
+	// 正の uuid / メタデータキャッシュに無ければ 1 回だけ確認する。404 はキャッシュしない。
 	if _, ok := isuUUIDCache.Load(jiaIsuUUID); !ok {
-		var exists int
-		err := db.Get(&exists, "SELECT 1 FROM `isu` WHERE `jia_isu_uuid` = ? LIMIT 1", jiaIsuUUID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return c.String(http.StatusNotFound, "not found: isu")
-		}
+		_, exists, err := loadIsuMetaByUUID(jiaIsuUUID)
 		if err != nil {
 			c.Logger().Errorf("db error: %v", err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
-		rememberIsuUUID(jiaIsuUUID)
+		if !exists {
+			return c.String(http.StatusNotFound, "not found: isu")
+		}
 	}
 
 	if err := insertIsuConditionsToValkey(c.Request().Context(), jiaIsuUUID, records); err != nil {
