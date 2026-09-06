@@ -22,6 +22,26 @@
 - 変更作業はローカル環境で行い、競技サーバーへの同期は `git pull` で行う。
 - 競技サーバー上で設定ファイルやアプリケーションコードを直接編集しない。
 
+## ローカル作業と Git worktree
+
+コード、設定、文書の変更は、リポジトリの主作業ツリーでは行わない。
+Issue または Pull Request 単位で `git worktree` を作成し、そのディレクトリで作業する。
+
+- 主作業ツリーは default branch を checkout した状態を保ち、未コミットの変更を残さない。
+- worktree のパスは `/tmp/isucon11q-issue-{番号}` とする。Issue 番号が無い場合は作業内容が分かる名前にする。
+- 新しい変更は default branch からブランチを切り、そのブランチを worktree に checkout する。
+- 既存の Issue / PR ブランチで続ける場合は、そのブランチを checkout した worktree を使う。同じ Issue 用の worktree が既にある場合は、新たに作らずそれを使う。
+- 異なる方針の変更は別の worktree と別の Pull Request にする。
+- 同じファイルを変更する作業を、複数の worktree で同時に進めない。
+- 競技サーバー上では worktree を使わない。サーバーでは `/` を作業ツリーとし、`git pull` で同期する。
+
+worktree の作成例:
+
+```bash
+git fetch origin
+git worktree add -b branch-name /tmp/isucon11q-issue-N origin/master
+```
+
 ## サーバー全体の Git 管理
 
 各競技サーバーでは `/` を Git の作業ツリーとして管理する。
@@ -224,6 +244,7 @@ Pull Request が default branch にマージされた後も、ベンチマーク
 - 主セッションは、目標 Issue、依存関係、ベースライン、サブエージェントの結果を確認し、
   変更の採否と次の委譲対象を判断する。
 - サブエージェントには Issue 番号、対象、完了条件、必要な記録、禁止事項を明示する。
+  コードや設定を変更する場合は、対象 Issue 用の worktree で作業させる。
   同じファイルや同じサーバーを変更する作業は並列に委譲しない。
 - サブエージェントの完了報告を受けた主セッションは、実測・Release・PR・Issue の記録を
   確認してから採否を決める。根拠が不足する変更は採用しない。
