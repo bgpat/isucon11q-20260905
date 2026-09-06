@@ -139,7 +139,7 @@ deploy-app:
 	test "$$(id -u)" -eq 0
 	test -d /home/isucon/webapp/go
 	test -f /home/isucon/webapp/go/go.mod
-	runuser -u isucon -- sh -c 'cd /home/isucon/webapp/go && /home/isucon/local/go/bin/go build -o isucondition .'
+	runuser -u isucon -- sh -c 'cd /home/isucon/webapp/go && /home/isucon/local/go/bin/go build -buildvcs=false -o isucondition .'
 	systemctl daemon-reload
 	systemctl restart isucondition.go.service
 	systemctl is-active --quiet isucondition.go.service
