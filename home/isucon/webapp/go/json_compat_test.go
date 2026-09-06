@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	stdjson "encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	gojson "github.com/goccy/go-json"
+	"github.com/labstack/echo/v4"
 )
 
 type jsonCompatibilityValue struct {
@@ -83,5 +85,81 @@ func TestGoJSONHTTPResponseCompatibility(t *testing.T) {
 		if !reflect.DeepEqual(r.Body.Bytes(), std) {
 			t.Fatalf("%s HTTP body mismatch: %s", name, r.Body.Bytes())
 		}
+	}
+}
+
+func TestWriteJSONMatchesEchoPretty(t *testing.T) {
+	ts := make([]int64, 8)
+	for i := range ts {
+		ts[i] = int64(1000 + i)
+	}
+	dp := GraphDataPoint{
+		Score: 80,
+		Percentage: ConditionsPercentage{
+			Sitting:      10,
+			IsBroken:     0,
+			IsDirty:      20,
+			IsOverweight: 0,
+		},
+	}
+	samples := []struct {
+		name string
+		code int
+		v    interface{}
+	}{
+		{"initialize", http.StatusOK, InitializeResponse{Language: "go"}},
+		{"me", http.StatusOK, GetMeResponse{JIAUserID: "user1"}},
+		{"graph", http.StatusOK, []GraphResponse{
+			{StartAt: 0, EndAt: 3600, Data: nil, ConditionTimestamps: []int64{}},
+			{StartAt: 3600, EndAt: 7200, Data: &dp, ConditionTimestamps: ts},
+		}},
+		{"condition", http.StatusOK, []*GetIsuConditionResponse{{
+			JIAIsuUUID:     "u",
+			IsuName:        "isu <x>&",
+			Timestamp:      1,
+			IsSitting:      true,
+			Condition:      "is_dirty=true,is_overweight=false,is_broken=false",
+			ConditionLevel: "warning",
+			Message:        "hello\nworld",
+		}}},
+		{"created-empty-maps", http.StatusCreated, jsonCompatibilityValue{
+			Text:       "<script>&日本語",
+			When:       time.Date(2026, 9, 6, 15, 0, 0, 123456789, time.FixedZone("JST", 9*60*60)),
+			EmptySlice: []string{},
+			EmptyMap:   map[string]string{},
+			Integer:    9007199254740991,
+			Float:      1.25,
+			Number:     stdjson.Number("12345678901234567890"),
+		}},
+		{"nil-slice-map", http.StatusOK, struct {
+			N *int           `json:"n"`
+			S []int          `json:"s"`
+			M map[string]int `json:"m"`
+		}{}},
+	}
+
+	e := echo.New()
+	e.Debug = true
+	for _, tc := range samples {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			recEcho := httptest.NewRecorder()
+			recFast := httptest.NewRecorder()
+			if err := e.NewContext(req, recEcho).JSON(tc.code, tc.v); err != nil {
+				t.Fatalf("echo JSON: %v", err)
+			}
+			if err := writeJSON(e.NewContext(req, recFast), tc.code, tc.v); err != nil {
+				t.Fatalf("writeJSON: %v", err)
+			}
+			if recEcho.Code != recFast.Code {
+				t.Fatalf("status echo=%d writeJSON=%d", recEcho.Code, recFast.Code)
+			}
+			if got, want := recFast.Header().Get(echo.HeaderContentType), recEcho.Header().Get(echo.HeaderContentType); got != want {
+				t.Fatalf("content-type echo=%q writeJSON=%q", want, got)
+			}
+			if !bytes.Equal(recEcho.Body.Bytes(), recFast.Body.Bytes()) {
+				t.Fatalf("body mismatch\necho: %s\nwriteJSON: %s", recEcho.Body.Bytes(), recFast.Body.Bytes())
+			}
+		})
 	}
 }
