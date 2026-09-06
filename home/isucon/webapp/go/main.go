@@ -456,9 +456,9 @@ func getUserIDFromSession(c echo.Context) (string, int, error) {
 	return jiaUserID, 0, nil
 }
 
-func getJIAServiceURL(tx *sqlx.Tx) string {
+func getJIAServiceURL(db *sqlx.DB) string {
 	var config Config
-	err := tx.Get(&config, "SELECT * FROM `isu_association_config` WHERE `name` = ?", "jia_service_url")
+	err := db.Get(&config, "SELECT * FROM `isu_association_config` WHERE `name` = ?", "jia_service_url")
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			log.Print(err)
@@ -744,8 +744,15 @@ func postIsu(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	// Commit the parent row before asking JIA to activate the ISU. Activation can
+	// immediately post conditions; holding this transaction would otherwise
+	// deadlock with the condition table's foreign-key lock on isu.
+	if err = tx.Commit(); err != nil {
+		c.Logger().Errorf("db error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
 
-	targetURL := getJIAServiceURL(tx) + "/api/activate"
+	targetURL := getJIAServiceURL(db) + "/api/activate"
 	body := JIAServiceRequest{postIsuConditionTargetBaseURL, jiaIsuUUID}
 	bodyJSON, err := performanceJSON.Marshal(body)
 	if err != nil {
@@ -785,14 +792,14 @@ func postIsu(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	_, err = tx.Exec("UPDATE `isu` SET `character` = ? WHERE  `jia_isu_uuid` = ?", isuFromJIA.Character, jiaIsuUUID)
+	_, err = db.Exec("UPDATE `isu` SET `character` = ? WHERE  `jia_isu_uuid` = ?", isuFromJIA.Character, jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	var isu Isu
-	err = tx.Get(
+	err = db.Get(
 		&isu,
 		"SELECT * FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
 		jiaUserID, jiaIsuUUID)
@@ -801,11 +808,6 @@ func postIsu(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	err = tx.Commit()
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
 	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
 		c.Logger().Errorf("failed to cache icon: %v", err)
 	}
