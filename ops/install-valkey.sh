@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Valkey を公式ソースから固定版で入れる。root で / 上の Git 作業ツリーから実行する。
-# バイナリは全台に入れる。systemd の enable/start は isucon1（ip-192-168-0-11）だけ。
+# バイナリは全台に入れる。systemd の enable/start は isucon2（ip-192-168-0-12）だけ。
 set -euo pipefail
 
 VALKEY_VERSION="9.0.6"
@@ -11,17 +11,17 @@ VALKEY_PREFIX="/usr/local"
 VALKEY_CONF="/etc/valkey/valkey.conf"
 VALKEY_DATA="/var/lib/valkey"
 VALKEY_USER="valkey"
-ISUCON1_HOSTNAME="ip-192-168-0-11"
+ISUCON2_HOSTNAME="ip-192-168-0-12"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "root で実行してください" >&2
   exit 1
 fi
 
-is_isucon1() {
+is_valkey_host() {
   local host
   host="$(hostname -s 2>/dev/null || hostname)"
-  [[ "${host}" == "${ISUCON1_HOSTNAME}" ]]
+  [[ "${host}" == "${ISUCON2_HOSTNAME}" ]]
 }
 
 install_build_deps() {
@@ -69,7 +69,7 @@ install_config() {
     echo "設定ファイルがありません: ${VALKEY_CONF}" >&2
     exit 1
   fi
-  if is_isucon1; then
+  if is_valkey_host; then
     local priv
     priv="$(hostname -I | awk '{print $1}')"
     if [[ -z "${priv}" ]]; then
@@ -96,7 +96,7 @@ install_unit() {
 }
 
 configure_service() {
-  if is_isucon1; then
+  if is_valkey_host; then
     systemctl enable valkey.service
     systemctl restart valkey.service
     local i
@@ -108,7 +108,7 @@ configure_service() {
     done
     systemctl is-active --quiet valkey.service
     "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping | grep -qx PONG
-    echo "Valkey を isucon1 で起動しました: $("${VALKEY_PREFIX}/bin/valkey-server" --version)"
+    echo "Valkey を isucon2 で起動しました: $("${VALKEY_PREFIX}/bin/valkey-server" --version)"
   else
     systemctl disable --now valkey.service 2>/dev/null || true
     echo "Valkey バイナリを入れました（このホストでは起動しません）: $(hostname -s)"

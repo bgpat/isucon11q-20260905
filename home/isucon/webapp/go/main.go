@@ -35,18 +35,18 @@ import (
 )
 
 const (
-	sessionName                 = "isucondition_go"
-	conditionLimit              = 20
-	frontendContentsPath        = "../public"
-	jiaJWTSigningKeyPath        = "../ec256-public.pem"
-	defaultIconFilePath         = "../NoImage.jpg"
-	isuIconCacheDir             = "/home/isucon/webapp/public/.isucondition-icon-cache"
-	isuIconInternalPath         = "/_isucondition_icon_cache/"
-	defaultJIAServiceURL        = "http://localhost:5000"
-	mysqlErrNumDuplicateEntry   = 1062
-	sessionCacheTTL             = 30 * time.Second
-	sessionCacheMaxEntries      = 10000
-	dropConditionLogIdle        = 10 * time.Second
+	sessionName               = "isucondition_go"
+	conditionLimit            = 20
+	frontendContentsPath      = "../public"
+	jiaJWTSigningKeyPath      = "../ec256-public.pem"
+	defaultIconFilePath       = "../NoImage.jpg"
+	isuIconCacheDir           = "/home/isucon/webapp/public/.isucondition-icon-cache"
+	isuIconInternalPath       = "/_isucondition_icon_cache/"
+	defaultJIAServiceURL      = "http://localhost:5000"
+	mysqlErrNumDuplicateEntry = 1062
+	sessionCacheTTL           = 30 * time.Second
+	sessionCacheMaxEntries    = 10000
+	dropConditionLogIdle      = 10 * time.Second
 	// #165: 10% 刻み二分探索。最初の2点は端の 0% と中点の 40%。
 	dropConditionProbability    = 0.0
 	conditionLevelInfo          = "info"
@@ -427,7 +427,7 @@ func getEnv(key string, defaultValue string) string {
 
 func NewMySQLConnectionEnv() *MySQLConnectionEnv {
 	return &MySQLConnectionEnv{
-		Host:     getEnv("MYSQL_HOST", "127.0.0.1"),
+		Host:     getEnv("MYSQL_HOST", defaultMySQLHost()),
 		Port:     getEnv("MYSQL_PORT", "3306"),
 		User:     getEnv("MYSQL_USER", "isucon"),
 		DBName:   getEnv("MYSQL_DBNAME", "isucondition"),
@@ -467,6 +467,9 @@ func main() {
 	}
 
 	e.POST("/initialize", postInitialize)
+	if hostnameIs(isucon2Hostname) {
+		e.POST("/internal/flush-caches", postInternalFlushCaches)
+	}
 
 	e.POST("/api/auth", postAuthentication)
 	e.POST("/api/signout", postSignout)
@@ -602,20 +605,58 @@ func postInitialize(c echo.Context) error {
 		c.Logger().Errorf("valkey load error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	invalidateTrendCache()
-	invalidateSessionCache()
-	invalidateIsuUUIDCache()
-	invalidateIsuMetaCache()
-	invalidateGraphCache()
-	invalidateCachedIcon()
-	if err := os.RemoveAll(isuIconCacheDir); err != nil {
+	if err := flushLocalRuntimeCaches(); err != nil {
 		c.Logger().Errorf("failed to clear icon cache: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	if err := flushPeerRuntimeCaches(); err != nil {
+		c.Logger().Errorf("peer flush error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	return writeJSON(c, http.StatusOK, InitializeResponse{
 		Language: "go",
 	})
+}
+
+func flushLocalRuntimeCaches() error {
+	invalidateTrendCache()
+	invalidateSessionCache()
+	invalidateIsuUUIDCache()
+	invalidateIsuMetaCache()
+	invalidateGraphCache()
+	invalidateCachedIcon()
+	return os.RemoveAll(isuIconCacheDir)
+}
+
+func postInternalFlushCaches(c echo.Context) error {
+	if err := flushLocalRuntimeCaches(); err != nil {
+		c.Logger().Errorf("flush caches: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func flushPeerRuntimeCaches() error {
+	if !hostnameIs(isucon1Hostname) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	url := "http://" + isucon2Hostname + ":3000/internal/flush-caches"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("peer flush status=%d", resp.StatusCode)
+	}
+	return nil
 }
 
 // POST /api/auth
@@ -1036,8 +1077,10 @@ func getIsuGraph(c echo.Context) error {
 	}
 	date := time.Unix(datetimeInt64, 0).Truncate(time.Hour)
 	cacheKey := graphCacheKey{jiaUserID: jiaUserID, jiaIsuUUID: jiaIsuUUID, startUnix: date.Unix()}
-	if body, ok := graphCacheGet(cacheKey); ok {
-		return writeJSONBytes(c, http.StatusOK, body)
+	if conditionWritesLocal() {
+		if body, ok := graphCacheGet(cacheKey); ok {
+			return writeJSONBytes(c, http.StatusOK, body)
+		}
 	}
 
 	_, ok, err := ownedIsuMeta(jiaIsuUUID, jiaUserID)
@@ -1059,7 +1102,9 @@ func getIsuGraph(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	graphCacheSet(cacheKey, body)
+	if conditionWritesLocal() {
+		graphCacheSet(cacheKey, body)
+	}
 	return writeJSONBytes(c, http.StatusOK, body)
 }
 
@@ -1460,17 +1505,23 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
-	if res, ok := loadTrendCache(); ok {
-		return writeJSON(c, http.StatusOK, res)
-	}
+	useLocalCache := conditionWritesLocal()
+	var gen uint64
+	if useLocalCache {
+		if res, ok := loadTrendCache(); ok {
+			return writeJSON(c, http.StatusOK, res)
+		}
 
-	// 再計算は trendComputeMu だけ直列化する。trendCache は持たないので
-	// POST /api/condition の invalidate は待たない。
-	trendComputeMu.Lock()
-	defer trendComputeMu.Unlock()
-	gen, res, hit := snapshotTrendCache()
-	if hit {
-		return writeJSON(c, http.StatusOK, res)
+		// 再計算は trendComputeMu だけ直列化する。trendCache は持たないので
+		// POST /api/condition の invalidate は待たない。
+		trendComputeMu.Lock()
+		defer trendComputeMu.Unlock()
+		var res []TrendResponse
+		var hit bool
+		gen, res, hit = snapshotTrendCache()
+		if hit {
+			return writeJSON(c, http.StatusOK, res)
+		}
 	}
 
 	characterList := []Isu{}
@@ -1555,7 +1606,7 @@ func getTrend(c echo.Context) error {
 		}
 	}
 
-	res = make([]TrendResponse, 0, len(characterList))
+	res := make([]TrendResponse, 0, len(characterList))
 	for _, character := range characterList {
 		res = append(res, TrendResponse{
 			Character: character.Character,
@@ -1564,7 +1615,9 @@ func getTrend(c echo.Context) error {
 			Critical:  critical[character.Character],
 		})
 	}
-	storeTrendCache(gen, res)
+	if useLocalCache {
+		storeTrendCache(gen, res)
+	}
 	return writeJSON(c, http.StatusOK, res)
 }
 

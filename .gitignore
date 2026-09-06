@@ -33,3 +33,5 @@
 !/ops/benchmark-report.py
 !/ops/benchmark_sql.py
 !/ops/test_benchmark_report.py
+!/ops/ensure-cluster-hosts.sh
+!/ops/configure-app-host.sh

@@ -14,11 +14,12 @@ import (
 )
 
 const (
-	conditionZKeyPrefix     = "cond:z:"
+	conditionZKeyPrefix      = "cond:z:"
 	conditionLatestKeyPrefix = "cond:latest:"
-	conditionKeyScanMatch   = "cond:*"
-	isucon1Hostname         = "ip-192-168-0-11"
-	valkeyLatestUpdateLua   = `
+	conditionKeyScanMatch    = "cond:*"
+	isucon1Hostname          = "ip-192-168-0-11"
+	isucon2Hostname          = "ip-192-168-0-12"
+	valkeyLatestUpdateLua    = `
 local cur = redis.call('GET', KEYS[1])
 local newts = tonumber(ARGV[1])
 if not cur then
@@ -47,18 +48,34 @@ type conditionRecord struct {
 	Message   string
 }
 
+func hostnameIs(want string) bool {
+	host, err := os.Hostname()
+	if err != nil {
+		return false
+	}
+	return host == want || strings.HasPrefix(host, want+".")
+}
+
+func conditionWritesLocal() bool {
+	return hostnameIs(isucon2Hostname)
+}
+
 func defaultValkeyAddr() string {
 	if addr := os.Getenv("VALKEY_ADDR"); addr != "" {
 		return addr
 	}
-	host, err := os.Hostname()
-	if err == nil {
-		if host == isucon1Hostname || strings.HasPrefix(host, isucon1Hostname+".") {
-			return "127.0.0.1:6379"
-		}
+	if hostnameIs(isucon2Hostname) {
+		return "127.0.0.1:6379"
 	}
-	// isucondition-1.t.isucon.dev は全台で 127.0.0.11 に向くため、isucon1 の hostname を使う。
-	return isucon1Hostname + ":6379"
+	// isucondition-1.t.isucon.dev は全台で 127.0.0.11 に向くため、isucon2 の hostname を使う。
+	return isucon2Hostname + ":6379"
+}
+
+func defaultMySQLHost() string {
+	if hostnameIs(isucon2Hostname) {
+		return isucon1Hostname
+	}
+	return "127.0.0.1"
 }
 
 func initValkeyClient() error {
