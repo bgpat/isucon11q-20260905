@@ -1538,6 +1538,7 @@ func postIsuCondition(c echo.Context) error {
 		return c.NoContent(http.StatusAccepted)
 	}
 
+	requestStart := time.Now()
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 	if jiaIsuUUID == "" {
 		return c.String(http.StatusBadRequest, "missing: jia_isu_uuid")
@@ -1571,25 +1572,11 @@ func postIsuCondition(c echo.Context) error {
 		rememberIsuUUID(jiaIsuUUID)
 	}
 
-	result, err := db.Exec(
-		"INSERT INTO `isu_condition` (`jia_isu_uuid`, `timestamp`, `is_sitting`, `condition`, `message`) VALUES "+
-			buildIsuConditionInsertValues(len(req)),
-		args...,
-	)
-	if err != nil {
+	// 短い待ち窓で他リクエストの行とまとめて 1 INSERT する（#240）。
+	if err := globalConditionBatcher.enqueue(args, len(req), requestStart); err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	inserted, err := result.RowsAffected()
-	if err != nil {
-		c.Logger().Errorf("db result error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	if inserted != int64(len(req)) {
-		c.Logger().Errorf("unexpected inserted condition count: got=%d want=%d", inserted, len(req))
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	invalidateTrendCache()
 	return c.NoContent(http.StatusAccepted)
 }
 
