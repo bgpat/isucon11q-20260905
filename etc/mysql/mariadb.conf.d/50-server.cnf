@@ -114,6 +114,9 @@ collation-server      = utf8mb4_general_ci
 #
 # InnoDB is enabled by default with a 10MB datafile in /var/lib/mysql/.
 # Read the manual for more InnoDB related options. There are many!
+# autocommit INSERT の毎文 fsync を避け、doublewrite の追加 I/O も外す（#254）。
+innodb_flush_log_at_trx_commit = 2
+innodb_doublewrite             = 0
 
 #
 # * Unix socket authentication plugin is built-in since 10.0.22-6
