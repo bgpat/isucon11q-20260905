@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/bytedance/sonic"
 	"github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
@@ -28,6 +29,12 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
 )
+
+func sonicJSON(c echo.Context, code int, value interface{}) error {
+	c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
+	c.Response().WriteHeader(code)
+	return sonic.ConfigFastest.NewEncoder(c.Response()).Encode(value)
+}
 
 const (
 	sessionName                 = "isucondition_go"
@@ -500,7 +507,7 @@ func postInitialize(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	return c.JSON(http.StatusOK, InitializeResponse{
+	return sonicJSON(c, http.StatusOK, InitializeResponse{
 		Language: "go",
 	})
 }
@@ -608,7 +615,7 @@ func getMe(c echo.Context) error {
 	}
 
 	res := GetMeResponse{JIAUserID: jiaUserID}
-	return c.JSON(http.StatusOK, res)
+	return sonicJSON(c, http.StatusOK, res)
 }
 
 // GET /api/isu
@@ -671,7 +678,7 @@ func getIsuList(c echo.Context) error {
 		responseList = append(responseList, res)
 	}
 
-	return c.JSON(http.StatusOK, responseList)
+	return sonicJSON(c, http.StatusOK, responseList)
 }
 
 // POST /api/isu
@@ -809,7 +816,7 @@ func postIsu(c echo.Context) error {
 	}
 	invalidateTrendCache()
 
-	return c.JSON(http.StatusCreated, isu)
+	return sonicJSON(c, http.StatusCreated, isu)
 }
 
 // GET /api/isu/:jia_isu_uuid
@@ -839,7 +846,7 @@ func getIsuID(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	return c.JSON(http.StatusOK, res)
+	return sonicJSON(c, http.StatusOK, res)
 }
 
 // GET /api/isu/:jia_isu_uuid/icon
@@ -936,7 +943,7 @@ func getIsuGraph(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	return c.JSON(http.StatusOK, res)
+	return sonicJSON(c, http.StatusOK, res)
 }
 
 // グラフのデータ点を一日分生成
@@ -1164,7 +1171,7 @@ func getIsuConditions(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	return c.JSON(http.StatusOK, conditionsResponse)
+	return sonicJSON(c, http.StatusOK, conditionsResponse)
 }
 
 // ISUのコンディションをDBから取得
@@ -1308,7 +1315,7 @@ func getTrend(c echo.Context) error {
 	defer trendCache.Unlock()
 	if trendCache.valid {
 		res := trendCache.response
-		return c.JSON(http.StatusOK, res)
+		return sonicJSON(c, http.StatusOK, res)
 	}
 
 	characterList := []Isu{}
@@ -1372,7 +1379,7 @@ func getTrend(c echo.Context) error {
 	trendCache.response = res
 	trendCache.valid = true
 
-	return c.JSON(http.StatusOK, res)
+	return sonicJSON(c, http.StatusOK, res)
 }
 
 // POST /api/condition/:jia_isu_uuid
