@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +35,8 @@ const (
 	frontendContentsPath        = "../public"
 	jiaJWTSigningKeyPath        = "../ec256-public.pem"
 	defaultIconFilePath         = "../NoImage.jpg"
+	isuIconCacheDir             = "/home/isucon/webapp/public/.isucondition-icon-cache"
+	isuIconInternalPath         = "/_isucondition_icon_cache/"
 	defaultJIAServiceURL        = "http://localhost:5000"
 	mysqlErrNumDuplicateEntry   = 1062
 	conditionLevelInfo          = "info"
@@ -63,6 +67,51 @@ func invalidateTrendCache() {
 	trendCache.valid = false
 	trendCache.response = nil
 	trendCache.Unlock()
+}
+
+func isuIconCachePath(jiaUserID, jiaIsuUUID string) string {
+	digest := sha256.Sum256([]byte(jiaUserID + "\x00" + jiaIsuUUID))
+	return filepath.Join(isuIconCacheDir, fmt.Sprintf("%x", digest))
+}
+
+func cacheIsuIcon(jiaUserID, jiaIsuUUID string, image []byte) (string, error) {
+	if err := os.MkdirAll(isuIconCacheDir, 0755); err != nil {
+		return "", err
+	}
+
+	path := isuIconCachePath(jiaUserID, jiaIsuUUID)
+	file, err := os.CreateTemp(isuIconCacheDir, ".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	tempPath := file.Name()
+	defer os.Remove(tempPath)
+
+	if _, err := file.Write(image); err != nil {
+		file.Close()
+		return "", err
+	}
+	if err := file.Chmod(0644); err != nil {
+		file.Close()
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func serveCachedIsuIcon(c echo.Context, jiaUserID, jiaIsuUUID string) bool {
+	path := isuIconCachePath(jiaUserID, jiaIsuUUID)
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	c.Response().Header().Set("X-Accel-Redirect", isuIconInternalPath+filepath.Base(path))
+	c.Response().Header().Set("Cache-Control", "private, max-age=60, must-revalidate")
+	return true
 }
 
 type Config struct {
@@ -365,6 +414,10 @@ func postInitialize(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	invalidateTrendCache()
+	if err := os.RemoveAll(isuIconCacheDir); err != nil {
+		c.Logger().Errorf("failed to clear icon cache: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
 
 	return c.JSON(http.StatusOK, InitializeResponse{
 		Language: "go",
@@ -667,6 +720,9 @@ func postIsu(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
+		c.Logger().Errorf("failed to cache icon: %v", err)
+	}
 	invalidateTrendCache()
 
 	return c.JSON(http.StatusCreated, isu)
@@ -716,6 +772,9 @@ func getIsuIcon(c echo.Context) error {
 	}
 
 	jiaIsuUUID := c.Param("jia_isu_uuid")
+	if serveCachedIsuIcon(c, jiaUserID, jiaIsuUUID) {
+		return c.NoContent(http.StatusOK)
+	}
 
 	var image []byte
 	err = db.Get(&image, "SELECT `image` FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
@@ -727,6 +786,13 @@ func getIsuIcon(c echo.Context) error {
 
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
+	}
+	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
+		c.Logger().Errorf("failed to cache icon: %v", err)
+		return c.Blob(http.StatusOK, "", image)
+	}
+	if serveCachedIsuIcon(c, jiaUserID, jiaIsuUUID) {
+		return c.NoContent(http.StatusOK)
 	}
 
 	return c.Blob(http.StatusOK, "", image)
