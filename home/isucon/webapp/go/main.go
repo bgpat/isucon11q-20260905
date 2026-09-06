@@ -47,8 +47,8 @@ const (
 	sessionCacheTTL             = 30 * time.Second
 	sessionCacheMaxEntries      = 10000
 	dropConditionLogIdle        = 10 * time.Second
-	// #165: 90% から 10% 刻みで二分探索する。最初の中点は 40%。
-	dropConditionProbability    = 0.4
+	// #165: 10% 刻み二分探索。最初の2点は端の 0% と中点の 40%。
+	dropConditionProbability    = 0.0
 	conditionLevelInfo          = "info"
 	conditionLevelWarning       = "warning"
 	conditionLevelCritical      = "critical"
