@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -30,29 +31,31 @@ import (
 )
 
 const (
-	sessionName                 = "isucondition_go"
-	conditionLimit              = 20
-	frontendContentsPath        = "../public"
-	jiaJWTSigningKeyPath        = "../ec256-public.pem"
-	defaultIconFilePath         = "../NoImage.jpg"
-	isuIconCacheDir             = "/home/isucon/webapp/public/.isucondition-icon-cache"
-	isuIconInternalPath         = "/_isucondition_icon_cache/"
-	defaultJIAServiceURL        = "http://localhost:5000"
-	mysqlErrNumDuplicateEntry   = 1062
-	sessionCacheTTL             = 30 * time.Second
-	sessionCacheMaxEntries      = 10000
-	conditionLevelInfo          = "info"
-	conditionLevelWarning       = "warning"
-	conditionLevelCritical      = "critical"
-	scoreConditionLevelInfo     = 3
-	scoreConditionLevelWarning  = 2
-	scoreConditionLevelCritical = 1
+	sessionName                         = "isucondition_go"
+	conditionLimit                      = 20
+	frontendContentsPath                = "../public"
+	jiaJWTSigningKeyPath                = "../ec256-public.pem"
+	defaultIconFilePath                 = "../NoImage.jpg"
+	isuIconCacheDir                     = "/home/isucon/webapp/public/.isucondition-icon-cache"
+	isuIconInternalPath                 = "/_isucondition_icon_cache/"
+	defaultJIAServiceURL                = "http://localhost:5000"
+	mysqlErrNumDuplicateEntry           = 1062
+	sessionCacheTTL                     = 30 * time.Second
+	sessionCacheMaxEntries              = 10000
+	conditionLevelInfo                  = "info"
+	conditionLevelWarning               = "warning"
+	conditionLevelCritical              = "critical"
+	scoreConditionLevelInfo             = 3
+	scoreConditionLevelWarning          = 2
+	scoreConditionLevelCritical         = 1
+	droppedConditionWarningEvery uint64 = 1024
 )
 
 var (
-	db                  *sqlx.DB
-	sessionStore        sessions.Store
-	mySQLConnectionData *MySQLConnectionEnv
+	db                    *sqlx.DB
+	sessionStore          sessions.Store
+	mySQLConnectionData   *MySQLConnectionEnv
+	droppedConditionPosts uint64
 
 	jiaJWTSigningKey *ecdsa.PublicKey
 
@@ -74,6 +77,16 @@ func invalidateTrendCache() {
 	trendCache.valid = false
 	trendCache.response = nil
 	trendCache.Unlock()
+}
+
+// logDroppedCondition keeps the drop behavior observable without synchronously
+// writing one journal entry for every dropped request. The count is cumulative
+// for the current process and is reset when the service restarts.
+func logDroppedCondition(c echo.Context) {
+	dropped := atomic.AddUint64(&droppedConditionPosts, 1)
+	if dropped == 1 || dropped%droppedConditionWarningEvery == 0 {
+		c.Logger().Warnf("drop post isu condition request: count=%d", dropped)
+	}
 }
 
 type sessionCacheEntry struct {
@@ -1381,7 +1394,7 @@ func postIsuConditionLegacy(c echo.Context) error {
 	// TODO: 一定割合リクエストを落としてしのぐようにしたが、本来は全量さばけるようにすべき
 	dropProbability := 0.9
 	if rand.Float64() <= dropProbability {
-		c.Logger().Warnf("drop post isu condition request")
+		logDroppedCondition(c)
 		return c.NoContent(http.StatusAccepted)
 	}
 
@@ -1448,7 +1461,7 @@ func postIsuCondition(c echo.Context) error {
 	// 既存の暫定的な drop 挙動は変更しない。DB 書き込みだけを一括化する。
 	dropProbability := 0.9
 	if rand.Float64() <= dropProbability {
-		c.Logger().Warnf("drop post isu condition request")
+		logDroppedCondition(c)
 		return c.NoContent(http.StatusAccepted)
 	}
 
