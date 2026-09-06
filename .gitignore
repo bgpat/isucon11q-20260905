@@ -27,10 +27,9 @@
 !/etc/mysql/mariadb.conf.d
 /etc/mysql/mariadb.conf.d/*
 !/etc/mysql/mariadb.conf.d/50-server.cnf
-# 継続目標の終了ガード
+# 運用スクリプト
 !/ops
 /ops/*
-!/ops/goal-score-guard.sh
 !/ops/benchmark-report.py
 !/ops/benchmark_sql.py
 !/ops/test_benchmark_report.py
