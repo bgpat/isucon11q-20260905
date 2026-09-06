@@ -71,6 +71,48 @@ func TestGraphCacheInvalidateWindow(t *testing.T) {
 	}
 }
 
+func TestGraphCacheInvalidateOverlappingHours(t *testing.T) {
+	invalidateGraphCache()
+	t.Cleanup(invalidateGraphCache)
+
+	start := time.Unix(1628521200, 0)
+	cur := graphCacheKey{jiaUserID: "u", jiaIsuUUID: "isu", startUnix: start.Unix()}
+	prev := graphCacheKey{jiaUserID: "u", jiaIsuUUID: "isu", startUnix: start.Add(-time.Hour).Unix()}
+	next := graphCacheKey{jiaUserID: "u", jiaIsuUUID: "isu", startUnix: start.Add(time.Hour).Unix()}
+	other := graphCacheKey{jiaUserID: "u", jiaIsuUUID: "keep", startUnix: start.Unix()}
+	graphCacheSet(cur, []byte("cur"))
+	graphCacheSet(prev, []byte("prev"))
+	graphCacheSet(next, []byte("next"))
+	graphCacheSet(other, []byte("keep"))
+	for i := 0; i < 32; i++ {
+		graphCacheSet(graphCacheKey{jiaUserID: "u", jiaIsuUUID: "noise", startUnix: start.Unix() + int64(i)*3600}, []byte("n"))
+	}
+
+	invalidateGraphCacheForConditions("isu", []time.Time{start})
+	if _, ok := graphCacheGet(cur); ok {
+		t.Fatal("start should invalidate current hour window")
+	}
+	if _, ok := graphCacheGet(prev); ok {
+		t.Fatal("start should invalidate previous hour window that still covers start")
+	}
+	if _, ok := graphCacheGet(next); !ok {
+		t.Fatal("next hour window starting after timestamp should remain")
+	}
+	if _, ok := graphCacheGet(other); !ok {
+		t.Fatal("other uuid should remain")
+	}
+
+	graphCacheSet(cur, []byte("cur"))
+	graphCacheSet(prev, []byte("prev"))
+	invalidateGraphCacheForConditions("isu", []time.Time{start.Add(-time.Second)})
+	if _, ok := graphCacheGet(cur); !ok {
+		t.Fatal("timestamp before current window should keep current hour")
+	}
+	if _, ok := graphCacheGet(prev); ok {
+		t.Fatal("timestamp one second before start should invalidate previous hour")
+	}
+}
+
 func TestInvalidateGraphCacheFromInsertArgs(t *testing.T) {
 	invalidateGraphCache()
 	t.Cleanup(invalidateGraphCache)
