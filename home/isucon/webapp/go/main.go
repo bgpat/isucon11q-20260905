@@ -1078,23 +1078,26 @@ func generateIsuGraphResponse(tx *sqlx.Tx, jiaIsuUUID string, graphDate time.Tim
 
 // 複数のISUのコンディションからグラフの一つのデータ点を計算
 func calculateGraphDataPoint(isuConditions []IsuCondition) (GraphDataPoint, error) {
-	conditionsCount := map[string]int{"is_broken": 0, "is_dirty": 0, "is_overweight": 0}
-	rawScore := 0
-	for _, condition := range isuConditions {
-		badConditionsCount := 0
-
-		if !isValidConditionFormat(condition.Condition) {
+	var isBrokenCount, isDirtyCount, isOverweightCount, sittingCount, rawScore int
+	for i := range isuConditions {
+		condition := &isuConditions[i]
+		isDirty, isOverweight, isBroken, ok := parseConditionFlags(condition.Condition)
+		if !ok {
 			return GraphDataPoint{}, fmt.Errorf("invalid condition format")
 		}
 
-		for _, condStr := range strings.Split(condition.Condition, ",") {
-			keyValue := strings.Split(condStr, "=")
-
-			conditionName := keyValue[0]
-			if keyValue[1] == "true" {
-				conditionsCount[conditionName] += 1
-				badConditionsCount++
-			}
+		badConditionsCount := 0
+		if isDirty {
+			isDirtyCount++
+			badConditionsCount++
+		}
+		if isOverweight {
+			isOverweightCount++
+			badConditionsCount++
+		}
+		if isBroken {
+			isBrokenCount++
+			badConditionsCount++
 		}
 
 		if badConditionsCount >= 3 {
@@ -1104,34 +1107,21 @@ func calculateGraphDataPoint(isuConditions []IsuCondition) (GraphDataPoint, erro
 		} else {
 			rawScore += scoreConditionLevelInfo
 		}
-	}
-
-	sittingCount := 0
-	for _, condition := range isuConditions {
 		if condition.IsSitting {
 			sittingCount++
 		}
 	}
 
-	isuConditionsLength := len(isuConditions)
-
-	score := rawScore * 100 / 3 / isuConditionsLength
-
-	sittingPercentage := sittingCount * 100 / isuConditionsLength
-	isBrokenPercentage := conditionsCount["is_broken"] * 100 / isuConditionsLength
-	isOverweightPercentage := conditionsCount["is_overweight"] * 100 / isuConditionsLength
-	isDirtyPercentage := conditionsCount["is_dirty"] * 100 / isuConditionsLength
-
-	dataPoint := GraphDataPoint{
-		Score: score,
+	n := len(isuConditions)
+	return GraphDataPoint{
+		Score: rawScore * 100 / 3 / n,
 		Percentage: ConditionsPercentage{
-			Sitting:      sittingPercentage,
-			IsBroken:     isBrokenPercentage,
-			IsOverweight: isOverweightPercentage,
-			IsDirty:      isDirtyPercentage,
+			Sitting:      sittingCount * 100 / n,
+			IsBroken:     isBrokenCount * 100 / n,
+			IsOverweight: isOverweightCount * 100 / n,
+			IsDirty:      isDirtyCount * 100 / n,
 		},
-	}
-	return dataPoint, nil
+	}, nil
 }
 
 // GET /api/condition/:jia_isu_uuid
@@ -1539,36 +1529,40 @@ func postIsuCondition(c echo.Context) error {
 
 // ISUのコンディションの文字列がcsv形式になっているか検証
 func isValidConditionFormat(conditionStr string) bool {
+	_, _, _, ok := parseConditionFlags(conditionStr)
+	return ok
+}
 
-	keys := []string{"is_dirty=", "is_overweight=", "is_broken="}
-	const valueTrue = "true"
-	const valueFalse = "false"
-
-	idxCondStr := 0
-
-	for idxKeys, key := range keys {
-		if !strings.HasPrefix(conditionStr[idxCondStr:], key) {
-			return false
+// parseConditionFlags は is_dirty / is_overweight / is_broken の固定順CSVを
+// 割り当てなしで検証し、各フラグが true かを返す。
+func parseConditionFlags(conditionStr string) (isDirty, isOverweight, isBroken, ok bool) {
+	keys := [...]string{"is_dirty=", "is_overweight=", "is_broken="}
+	var flags [3]bool
+	idx := 0
+	for i, key := range keys {
+		if idx > len(conditionStr) || !strings.HasPrefix(conditionStr[idx:], key) {
+			return false, false, false, false
 		}
-		idxCondStr += len(key)
-
-		if strings.HasPrefix(conditionStr[idxCondStr:], valueTrue) {
-			idxCondStr += len(valueTrue)
-		} else if strings.HasPrefix(conditionStr[idxCondStr:], valueFalse) {
-			idxCondStr += len(valueFalse)
+		idx += len(key)
+		if strings.HasPrefix(conditionStr[idx:], "true") {
+			flags[i] = true
+			idx += len("true")
+		} else if strings.HasPrefix(conditionStr[idx:], "false") {
+			idx += len("false")
 		} else {
-			return false
+			return false, false, false, false
 		}
-
-		if idxKeys < (len(keys) - 1) {
-			if conditionStr[idxCondStr] != ',' {
-				return false
+		if i < len(keys)-1 {
+			if idx >= len(conditionStr) || conditionStr[idx] != ',' {
+				return false, false, false, false
 			}
-			idxCondStr++
+			idx++
 		}
 	}
-
-	return (idxCondStr == len(conditionStr))
+	if idx != len(conditionStr) {
+		return false, false, false, false
+	}
+	return flags[0], flags[1], flags[2], true
 }
 
 func getIndex(c echo.Context) error {
