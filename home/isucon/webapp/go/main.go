@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -21,6 +20,7 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/bytedance/sonic"
 	"github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
@@ -28,6 +28,8 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
 )
+
+var performanceJSON = sonic.ConfigFastest
 
 const (
 	sessionName                 = "isucondition_go"
@@ -745,7 +747,7 @@ func postIsu(c echo.Context) error {
 
 	targetURL := getJIAServiceURL(tx) + "/api/activate"
 	body := JIAServiceRequest{postIsuConditionTargetBaseURL, jiaIsuUUID}
-	bodyJSON, err := json.Marshal(body)
+	bodyJSON, err := performanceJSON.Marshal(body)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -777,7 +779,7 @@ func postIsu(c echo.Context) error {
 	}
 
 	var isuFromJIA IsuFromJIA
-	err = json.Unmarshal(resBody, &isuFromJIA)
+	err = performanceJSON.Unmarshal(resBody, &isuFromJIA)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
