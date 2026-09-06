@@ -1,0 +1,21 @@
+[Unit]
+Description=Valkey In-Memory Data Store
+After=network.target
+Documentation=https://valkey.io/
+
+[Service]
+Type=simple
+User=valkey
+Group=valkey
+ExecStart=/usr/local/bin/valkey-server /etc/valkey/valkey.conf
+ExecStop=/usr/local/bin/valkey-cli -h 127.0.0.1 -p 6379 shutdown
+Restart=always
+RestartSec=1
+LimitNOFILE=65535
+RuntimeDirectory=valkey
+RuntimeDirectoryMode=0755
+ReadWritePaths=/var/lib/valkey
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
