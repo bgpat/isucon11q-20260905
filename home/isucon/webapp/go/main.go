@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -66,6 +68,11 @@ var (
 		sync.Mutex
 		entries     map[string]sessionCacheEntry
 		nextCleanup time.Time
+	}
+	prettyJSONBufPool = sync.Pool{
+		New: func() interface{} {
+			return new(bytes.Buffer)
+		},
 	}
 )
 
@@ -137,6 +144,28 @@ func invalidateSessionCache() {
 	sessionCache.entries = nil
 	sessionCache.nextCleanup = time.Time{}
 	sessionCache.Unlock()
+}
+
+// writeJSON は Echo 4.3.0 が e.Debug=true のとき c.JSON で出す pretty JSON と
+// 同じバイト列を書く。json.Encoder.SetIndent の compact marshal + Indent 再パースを避け、
+// json/v2 で 2 スペース indent を1パスで出す。末尾改行は Encoder.Encode に合わせる。
+func writeJSON(c echo.Context, code int, v interface{}) error {
+	buf := prettyJSONBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer prettyJSONBufPool.Put(buf)
+
+	if err := jsonv2.MarshalWrite(buf, v, json.DefaultOptionsV1(), jsontext.WithIndent("  ")); err != nil {
+		return err
+	}
+	buf.WriteByte('\n')
+
+	res := c.Response()
+	if res.Header().Get(echo.HeaderContentType) == "" {
+		res.Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
+	}
+	res.WriteHeader(code)
+	_, err := res.Write(buf.Bytes())
+	return err
 }
 
 func isuIconCachePath(jiaUserID, jiaIsuUUID string) string {
@@ -500,7 +529,7 @@ func postInitialize(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	return c.JSON(http.StatusOK, InitializeResponse{
+	return writeJSON(c, http.StatusOK, InitializeResponse{
 		Language: "go",
 	})
 }
@@ -608,7 +637,7 @@ func getMe(c echo.Context) error {
 	}
 
 	res := GetMeResponse{JIAUserID: jiaUserID}
-	return c.JSON(http.StatusOK, res)
+	return writeJSON(c, http.StatusOK, res)
 }
 
 // GET /api/isu
@@ -671,7 +700,7 @@ func getIsuList(c echo.Context) error {
 		responseList = append(responseList, res)
 	}
 
-	return c.JSON(http.StatusOK, responseList)
+	return writeJSON(c, http.StatusOK, responseList)
 }
 
 // POST /api/isu
@@ -811,7 +840,7 @@ func postIsu(c echo.Context) error {
 	}
 	invalidateTrendCache()
 
-	return c.JSON(http.StatusCreated, isu)
+	return writeJSON(c, http.StatusCreated, isu)
 }
 
 // GET /api/isu/:jia_isu_uuid
@@ -841,7 +870,7 @@ func getIsuID(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	return c.JSON(http.StatusOK, res)
+	return writeJSON(c, http.StatusOK, res)
 }
 
 // GET /api/isu/:jia_isu_uuid/icon
@@ -938,7 +967,7 @@ func getIsuGraph(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	return c.JSON(http.StatusOK, res)
+	return writeJSON(c, http.StatusOK, res)
 }
 
 // グラフのデータ点を一日分生成
@@ -1156,7 +1185,7 @@ func getIsuConditions(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	return c.JSON(http.StatusOK, conditionsResponse)
+	return writeJSON(c, http.StatusOK, conditionsResponse)
 }
 
 // ISUのコンディションをDBから取得
@@ -1300,7 +1329,7 @@ func getTrend(c echo.Context) error {
 	defer trendCache.Unlock()
 	if trendCache.valid {
 		res := trendCache.response
-		return c.JSON(http.StatusOK, res)
+		return writeJSON(c, http.StatusOK, res)
 	}
 
 	characterList := []Isu{}
@@ -1364,7 +1393,7 @@ func getTrend(c echo.Context) error {
 	trendCache.response = res
 	trendCache.valid = true
 
-	return c.JSON(http.StatusOK, res)
+	return writeJSON(c, http.StatusOK, res)
 }
 
 // POST /api/condition/:jia_isu_uuid
