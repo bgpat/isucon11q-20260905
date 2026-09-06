@@ -65,14 +65,19 @@ install_config() {
   if [[ -f /etc/valkey/valkey.conf ]] && [[ ! -f /etc/valkey/valkey.conf.bak ]]; then
     cp -a /etc/valkey/valkey.conf /etc/valkey/valkey.conf.bak
   fi
-  # Git 管理の設定を優先する。未同期なら同梱テンプレを使う。
-  if [[ -f "${VALKEY_CONF}" ]]; then
-    :
-  elif [[ -f /files/valkey/valkey.conf ]]; then
-    cp -f /files/valkey/valkey.conf "${VALKEY_CONF}"
-  else
+  if [[ ! -f "${VALKEY_CONF}" ]]; then
     echo "設定ファイルがありません: ${VALKEY_CONF}" >&2
     exit 1
+  fi
+  if is_isucon1; then
+    local priv
+    priv="$(hostname -I | awk '{print $1}')"
+    if [[ -z "${priv}" ]]; then
+      echo "私有 IP を取得できません" >&2
+      exit 1
+    fi
+    # isucondition-1.t.isucon.dev は全台で 127.0.0.11 に向くため、私有 IP で listen する。
+    sed -i -E "s/^bind .*/bind 127.0.0.1 ${priv}/" "${VALKEY_CONF}"
   fi
   chown root:root "${VALKEY_CONF}"
   chmod 0644 "${VALKEY_CONF}"
@@ -94,6 +99,13 @@ configure_service() {
   if is_isucon1; then
     systemctl enable valkey.service
     systemctl restart valkey.service
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      if "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -qx PONG; then
+        break
+      fi
+      sleep 0.5
+    done
     systemctl is-active --quiet valkey.service
     "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping | grep -qx PONG
     echo "Valkey を isucon1 で起動しました: $("${VALKEY_PREFIX}/bin/valkey-server" --version)"

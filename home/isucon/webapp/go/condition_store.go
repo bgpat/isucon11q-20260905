@@ -57,7 +57,8 @@ func defaultValkeyAddr() string {
 			return "127.0.0.1:6379"
 		}
 	}
-	return "isucondition-1.t.isucon.dev:6379"
+	// isucondition-1.t.isucon.dev は全台で 127.0.0.11 に向くため、isucon1 の hostname を使う。
+	return isucon1Hostname + ":6379"
 }
 
 func initValkeyClient() error {
