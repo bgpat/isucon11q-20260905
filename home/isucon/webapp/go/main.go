@@ -47,6 +47,8 @@ const (
 	sessionCacheTTL             = 30 * time.Second
 	sessionCacheMaxEntries      = 10000
 	dropConditionLogIdle        = 10 * time.Second
+	// #165: 10% 刻み二分探索。最初の2点は端の 0% と中点の 40%。
+	dropConditionProbability    = 0.0
 	conditionLevelInfo          = "info"
 	conditionLevelWarning       = "warning"
 	conditionLevelCritical      = "critical"
@@ -1579,8 +1581,7 @@ func startDropConditionLogFlusher() {
 // ISUからのコンディションを受け取る
 func postIsuConditionLegacy(c echo.Context) error {
 	// TODO: 一定割合リクエストを落としてしのぐようにしたが、本来は全量さばけるようにすべき
-	dropProbability := 0.9
-	if rand.Float64() <= dropProbability {
+	if rand.Float64() <= dropConditionProbability {
 		noteDroppedIsuCondition()
 		return c.NoContent(http.StatusAccepted)
 	}
@@ -1645,9 +1646,7 @@ func postIsuConditionLegacy(c echo.Context) error {
 }
 
 func postIsuCondition(c echo.Context) error {
-	// 既存の暫定的な drop 挙動は変更しない。DB 書き込みだけを Valkey に移す。
-	dropProbability := 0.9
-	if rand.Float64() <= dropProbability {
+	if rand.Float64() <= dropConditionProbability {
 		noteDroppedIsuCondition()
 		return c.NoContent(http.StatusAccepted)
 	}
