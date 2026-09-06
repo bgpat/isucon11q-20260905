@@ -1555,7 +1555,7 @@ func getTrend(c echo.Context) error {
 		}
 	}
 
-	res := make([]TrendResponse, 0, len(characterList))
+	res = make([]TrendResponse, 0, len(characterList))
 	for _, character := range characterList {
 		res = append(res, TrendResponse{
 			Character: character.Character,
