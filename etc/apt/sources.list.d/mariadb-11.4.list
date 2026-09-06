@@ -1,3 +1,0 @@
-# MariaDB Community Server 11.4 for Ubuntu 20.04 (Focal).
-# Signing key fingerprint: 177F 4010 FE56 CA33 3630 0305 F165 6F24 C74C D1D8
-deb [signed-by=/etc/apt/keyrings/mariadb-keyring.asc] https://dlm.mariadb.com/repo/mariadb-server/11.4/repo/ubuntu focal main
