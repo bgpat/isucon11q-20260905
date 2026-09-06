@@ -70,10 +70,17 @@ git add -f *.go
 `ISUCON_WORK_DIR` で保存ディレクトリを変更できる。`prepare` は timing.tsv を消さない。
 
 ```sh
-sh ops/benchmark-assets.sh time deploy-isucon1 -- ssh root@isucon1 'make deploy-app'
+sh ops/benchmark-assets.sh time deploy-isucon1 -- ssh root@isucon1 'make -C / deploy-app'
 sh ops/benchmark-assets.sh time archive -- sh ops/benchmark-assets.sh archive candidate
 sh ops/benchmark-assets.sh time release-upload -- gh release upload TAG /tmp/isucon-work/candidate-assets.tar.gz
 sh ops/benchmark-assets.sh timing-report
+```
+
+`timing.tsv` は `current/` の外にあるため、`archive` のアーカイブには含まれない。
+後処理完了後に別のRelease assetとして添付する。次の計測を始める前に添付を終える。
+
+```sh
+gh release upload TAG /tmp/isucon-work/timing.tsv
 ```
 
 同期、デプロイ確認、ベンチ、profile取得、ログ取得・圧縮、SQL/pprof分析、Release作成・upload、
