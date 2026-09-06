@@ -64,6 +64,29 @@ git add -f *.go
 
 ### デプロイ・計測・後処理の所要時間
 
+保存済み baseline/candidate の後処理は使い捨てスクリプトを作らず、次の定型コマンドを使う。
+各入力は `bench.log`、`timing.json`（commit/load/end）、`slow.log.gz`、`cpu.pprof`、
+`prometheus-cpu.json`、`db-before.txt`、`db-after.txt` を含む収集ディレクトリ。
+
+```sh
+sh ops/benchmark-assets.sh time report -- python3 ops/benchmark-report.py --baseline /tmp/isucon-work/baseline --candidate /tmp/isucon-work/candidate --pr 233 --issue 226 --tag benchmark-TIMESTAMP-score-SCORE
+```
+
+外部投稿なしで `/tmp/isucon-work/report/` に `report.md`、`metrics.json`、`assets.tar.gz`、
+`processing.json` を生成する。入力ディレクトリは変更しない。出力は固定名で更新する。
+SQL/pprof/CPU を並列集計し、SQL/pprof top20、CPU・DB差分、比較commitと窓を自動記録する。
+SQL は LOAD 次整数秒から59秒（実際の終了秒まで）の同長窓で比較する。
+CPU は instance ごとに区別し、移動rateの積分による推定値として表示する。
+`processing.json` に並列集計全体・本文生成・圧縮の経過秒、既存 `timing.tsv` に全体とpprofを記録する。
+機械集計は仮説・採否を決めない。レビュー後 `--hypothesis '仮説' --decision '判断と根拠'` を指定する。
+`--publish` を付けた場合だけ計測commitをtargetにRelease作成とasset添付、PR/Issueコメントを行う。
+既存Releaseを上書きせずエラーで停止する。公開が途中失敗した場合は作成済みReleaseを確認し、
+未完了のupload/commentのみ再実行する。再公開のためにタグを変えて同一計測を重複登録しない。
+
+```sh
+python3 -m unittest discover -s ops -p test_benchmark_report.py
+```
+
 各処理をローカルの `time` サブコマンドで囲み、開始・終了・経過秒・終了コードを記録する。
 出力は固定名 `/tmp/isucon-work/timing.tsv` で、コマンド内容や認証情報は記録しない。
 既存記録は追記で残す。新しい比較単位では、既存TSVを計測成果物として退避してから開始する。
