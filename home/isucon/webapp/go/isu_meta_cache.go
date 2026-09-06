@@ -33,7 +33,7 @@ type isuMetaStore struct {
 
 var isuMetas isuMetaStore
 
-const isuMetaSelectColumns = "`id`, `jia_isu_uuid`, `name`, `character`, `jia_user_id`"
+const isuMetaSelectColumns = "`id`, `jia_isu_uuid`, `name`, COALESCE(`character`, '') AS `character`, `jia_user_id`"
 
 func (s *isuMetaStore) ensureLocked() {
 	if s.byUUID == nil {
