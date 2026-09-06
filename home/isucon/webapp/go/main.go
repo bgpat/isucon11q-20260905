@@ -908,7 +908,7 @@ func getIsuID(c echo.Context) error {
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
 	var res Isu
-	err = db.Get(&res, "SELECT * FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
+	err = db.Get(&res, "SELECT `id`, `jia_isu_uuid`, `name`, `character` FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
 		jiaUserID, jiaIsuUUID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1300,7 +1300,7 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 	hasCursor := false
 
 	for {
-		query := "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ? AND `timestamp` < ?"
+		query := "SELECT `id`, `timestamp`, `is_sitting`, `condition`, `message` FROM `isu_condition` WHERE `jia_isu_uuid` = ? AND `timestamp` < ?"
 		args := []interface{}{jiaIsuUUID, endTime}
 		if !startTime.IsZero() {
 			query += " AND `timestamp` >= ?"
@@ -1326,7 +1326,7 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 				continue
 			}
 			conditionsResponse = append(conditionsResponse, &GetIsuConditionResponse{
-				JIAIsuUUID:     condition.JIAIsuUUID,
+				JIAIsuUUID:     jiaIsuUUID,
 				IsuName:        isuName,
 				Timestamp:      condition.Timestamp.Unix(),
 				IsSitting:      condition.IsSitting,
