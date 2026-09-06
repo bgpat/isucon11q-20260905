@@ -1463,40 +1463,43 @@ func postIsuCondition(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "bad request body")
 	}
 
-	tx, err := db.Beginx()
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	defer tx.Rollback()
-	var count int
-	if err = tx.Get(&count, "SELECT COUNT(*) FROM `isu` WHERE `jia_isu_uuid` = ?", jiaIsuUUID); err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	if count == 0 {
-		return c.String(http.StatusNotFound, "not found: isu")
-	}
-
-	valuePlaceholders := make([]string, 0, len(req))
+	// ISU の存在確認と登録を 1 ステートメントにまとめる。以前の
+	// SELECT -> INSERT -> COMMIT は、受理した要求ごとに3回のDB往復を
+	// 発生させていた。INSERT ... SELECT は autocommit で原子的に実行される。
+	valueSelects := make([]string, 0, len(req))
 	args := make([]interface{}, 0, len(req)*5)
-	for _, cond := range req {
+	for i, cond := range req {
 		if !isValidConditionFormat(cond.Condition) {
 			return c.String(http.StatusBadRequest, "bad request body")
 		}
-		valuePlaceholders = append(valuePlaceholders, "(?, ?, ?, ?, ?)")
+		if i == 0 {
+			valueSelects = append(valueSelects, "SELECT ? AS jia_isu_uuid, ? AS timestamp, ? AS is_sitting, ? AS condition, ? AS message")
+		} else {
+			valueSelects = append(valueSelects, "SELECT ?, ?, ?, ?, ?")
+		}
 		args = append(args, jiaIsuUUID, time.Unix(cond.Timestamp, 0), cond.IsSitting, cond.Condition, cond.Message)
 	}
-	_, err = tx.Exec(
-		"INSERT INTO `isu_condition` (`jia_isu_uuid`, `timestamp`, `is_sitting`, `condition`, `message`) VALUES "+strings.Join(valuePlaceholders, ","),
+	result, err := db.Exec(
+		"INSERT INTO `isu_condition` (`jia_isu_uuid`, `timestamp`, `is_sitting`, `condition`, `message`) "+
+			"SELECT values_to_insert.jia_isu_uuid, values_to_insert.timestamp, values_to_insert.is_sitting, values_to_insert.condition, values_to_insert.message "+
+			"FROM ("+strings.Join(valueSelects, " UNION ALL ")+") AS values_to_insert "+
+			"INNER JOIN `isu` ON `isu`.`jia_isu_uuid` = values_to_insert.jia_isu_uuid",
 		args...,
 	)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	if err = tx.Commit(); err != nil {
-		c.Logger().Errorf("db error: %v", err)
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		c.Logger().Errorf("db result error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	if inserted == 0 {
+		return c.String(http.StatusNotFound, "not found: isu")
+	}
+	if inserted != int64(len(req)) {
+		c.Logger().Errorf("unexpected inserted condition count: got=%d want=%d", inserted, len(req))
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	invalidateTrendCache()
