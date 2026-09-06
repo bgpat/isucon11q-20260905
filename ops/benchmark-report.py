@@ -60,9 +60,30 @@ def final_score(log):
     if load_end < 0 or finish < load_end:
         raise ValueError('ベンチ未完走: LOAD END/sendResult finishが必要')
     scores = list(re.finditer(r'score:\s*(\d+)\((\d+)\s*-\s*(\d+)\)\s*:\s*(\w+)', log))
-    if not scores or not load_end < scores[-1].start() < finish:
+    if not scores:
+        raise ValueError('最終scoreが見つからない')
+    def stamp(position):
+        line = log[log.rfind('\n',0,position)+1:position]
+        matched = re.match(r'(\d\d):(\d\d):(\d\d(?:\.\d+)?)\s',line)
+        if not matched:
+            return None
+        hour,minute,second = map(float,matched.groups())
+        return hour*3600+minute*60+second
+    end_time, finish_time = stamp(load_end), stamp(finish)
+    selected = scores[-1]
+    if end_time is not None and finish_time is not None:
+        # stdout/stderr合流では物理行順が逆転する。24時跨ぎも秒差で扱う。
+        duration = (finish_time-end_time) % 86400
+        if duration > 60:
+            raise ValueError('完走marker時刻が不整合')
+        candidates = [( (stamp(s.start())-end_time) % 86400, s) for s in scores if stamp(s.start()) is not None]
+        candidates = [(delta,s) for delta,s in candidates if delta <= duration]
+        if not candidates:
+            raise ValueError('完走時刻内の最終scoreが見つからない')
+        selected = max(candidates,key=lambda item:item[0])[1]
+    elif not load_end < selected.start() < finish:
         raise ValueError('LOAD END後の最終scoreが見つからない')
-    score, gross, penalty, state = scores[-1].groups()
+    score, gross, penalty, state = selected.groups()
     if int(score) != int(gross) - int(penalty):
         raise ValueError('最終score内訳が不一致')
     return int(score), state
