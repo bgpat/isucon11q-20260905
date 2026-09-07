@@ -1,0 +1,4 @@
+-- グラフ covering index は #228 で追加したが、#249 のグラフキャッシュ後は
+-- 読取便益が小さく、condition INSERT が二次 index 2 本へ書く残コストになった。
+-- initialize は 0_Schema から再作成するため、ここでは ADD しない。
+-- 一覧用 (jia_isu_uuid, timestamp DESC, id DESC) は 001 のまま残す。

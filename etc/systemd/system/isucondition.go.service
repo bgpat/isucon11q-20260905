@@ -1,6 +1,6 @@
 [Unit]
 Description=isucondition.go
-After=network.target mysql.service cloud-config.service
+After=network.target mysql.service valkey.service cloud-config.service
 
 [Service]
 WorkingDirectory=/home/isucon/webapp/go
@@ -11,7 +11,6 @@ User=isucon
 Group=www-data
 RuntimeDirectory=isucondition
 RuntimeDirectoryMode=0750
-UMask=0007
 Environment=SERVER_UNIX_SOCKET=/run/isucondition/isucondition.sock
 ExecStart=/home/isucon/webapp/go/isucondition
 

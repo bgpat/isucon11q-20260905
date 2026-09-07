@@ -141,6 +141,15 @@ deploy-app:
 	test -f /home/isucon/webapp/go/go.mod
 	runuser -u isucon -- sh -c 'cd /home/isucon/webapp/go && /home/isucon/local/go/bin/go build -buildvcs=false -o isucondition .'
 	systemctl daemon-reload
+	@if [ "$$(hostname -s 2>/dev/null || hostname)" = "ip-192-168-0-11" ]; then \
+		priv=$$(hostname -I | awk '{print $$1}'); \
+		sed -i -E "s/^bind .*/bind 127.0.0.1 $${priv}/" /etc/valkey/valkey.conf; \
+		systemctl enable valkey.service; \
+		systemctl restart valkey.service; \
+		systemctl is-active --quiet valkey.service; \
+	else \
+		systemctl disable --now valkey.service; \
+	fi
 	systemctl restart isucondition.go.service
 	systemctl is-active --quiet isucondition.go.service
 
@@ -149,6 +158,11 @@ upgrade-go:
 	test "$$(id -u)" -eq 0
 	/ops/install-go.sh
 	$(MAKE) deploy-app
+
+.PHONY: install-valkey
+install-valkey:
+	test "$$(id -u)" -eq 0
+	/ops/install-valkey.sh
 
 # Override LOG_FILES with paths confirmed on the target server. Do not add
 # unconfirmed server-specific paths here.

@@ -12,6 +12,12 @@
 /home/isucon/webapp/sql/*
 !/home/isucon/webapp/sql/0_Schema.sql
 !/home/isucon/webapp/sql/init.sh
+# /assets の事前圧縮ファイルだけ追跡する。元ファイルは Git に入れない
+!/home/isucon/webapp/public
+/home/isucon/webapp/public/*
+!/home/isucon/webapp/public/assets
+/home/isucon/webapp/public/assets/*
+!/home/isucon/webapp/public/assets/*.gz
 # 計測専用の pprof 設定とサービス設定
 !/etc
 /etc/*
@@ -27,7 +33,9 @@
 !/etc/mysql/mariadb.conf.d
 /etc/mysql/mariadb.conf.d/*
 !/etc/mysql/mariadb.conf.d/50-server.cnf
-# 継続目標の終了ガード
+# 運用スクリプト
 !/ops
 /ops/*
-!/ops/goal-score-guard.sh
+!/ops/benchmark-report.py
+!/ops/benchmark_sql.py
+!/ops/test_benchmark_report.py
