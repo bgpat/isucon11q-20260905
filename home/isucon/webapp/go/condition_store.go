@@ -14,11 +14,17 @@ import (
 )
 
 const (
-	conditionZKeyPrefix     = "cond:z:"
+	conditionZKeyPrefix      = "cond:z:"
 	conditionLatestKeyPrefix = "cond:latest:"
-	conditionKeyScanMatch   = "cond:*"
-	isucon1Hostname         = "ip-192-168-0-11"
-	valkeyLatestUpdateLua   = `
+	conditionKeyScanMatch    = "cond:*"
+	isucon1Hostname          = "ip-192-168-0-11"
+	conditionMemberVer1      = 1
+	conditionMemberHdrLen    = 18
+	flagSitting              = 1 << 0
+	flagDirty                = 1 << 1
+	flagOverweight           = 1 << 2
+	flagBroken               = 1 << 3
+	valkeyLatestUpdateLua    = `
 local cur = redis.call('GET', KEYS[1])
 local newts = tonumber(ARGV[1])
 if not cur then
@@ -36,8 +42,18 @@ return 0
 )
 
 var (
-	valkeyClient     valkey.Client
-	conditionUniqSeq uint64
+	valkeyClient       valkey.Client
+	conditionUniqSeq   uint64
+	packedConditionCSV = [8]string{
+		0: "is_dirty=false,is_overweight=false,is_broken=false",
+		1: "is_dirty=true,is_overweight=false,is_broken=false",
+		2: "is_dirty=false,is_overweight=true,is_broken=false",
+		3: "is_dirty=true,is_overweight=true,is_broken=false",
+		4: "is_dirty=false,is_overweight=false,is_broken=true",
+		5: "is_dirty=true,is_overweight=false,is_broken=true",
+		6: "is_dirty=false,is_overweight=true,is_broken=true",
+		7: "is_dirty=true,is_overweight=true,is_broken=true",
+	}
 )
 
 type conditionRecord struct {
@@ -81,26 +97,63 @@ func conditionLatestKey(jiaIsuUUID string) string {
 	return conditionLatestKeyPrefix + jiaIsuUUID
 }
 
-func encodeConditionMember(rec conditionRecord) string {
+func encodeConditionMember(rec conditionRecord) (string, error) {
+	dirty, overweight, broken, ok := parseConditionFlags(rec.Condition)
+	if !ok {
+		return "", fmt.Errorf("invalid condition")
+	}
 	uniq := atomic.AddUint64(&conditionUniqSeq, 1)
-	return fmt.Sprintf("%d\x1e%t\x1e%s\x1e%s", uniq, rec.IsSitting, rec.Condition, rec.Message)
+	buf := make([]byte, conditionMemberHdrLen+len(rec.Message))
+	buf[0] = conditionMemberVer1
+	var flags byte
+	if rec.IsSitting {
+		flags |= flagSitting
+	}
+	if dirty {
+		flags |= flagDirty
+	}
+	if overweight {
+		flags |= flagOverweight
+	}
+	if broken {
+		flags |= flagBroken
+	}
+	buf[1] = flags
+	putBEUint64(buf[2:10], uniq)
+	putBEUint64(buf[10:18], uint64(rec.Timestamp.Unix()))
+	copy(buf[18:], rec.Message)
+	return string(buf), nil
 }
 
-func decodeConditionMember(member string, score float64) (conditionRecord, error) {
-	parts := strings.SplitN(member, "\x1e", 4)
-	if len(parts) != 4 {
+func decodeConditionMember(member string) (conditionRecord, error) {
+	if len(member) < conditionMemberHdrLen || member[0] != conditionMemberVer1 {
 		return conditionRecord{}, fmt.Errorf("invalid condition member")
 	}
-	sitting, err := strconv.ParseBool(parts[1])
-	if err != nil {
-		return conditionRecord{}, fmt.Errorf("invalid is_sitting: %w", err)
-	}
+	flags := member[1]
 	return conditionRecord{
-		Timestamp: time.Unix(int64(score), 0),
-		IsSitting: sitting,
-		Condition: parts[2],
-		Message:   parts[3],
+		Timestamp: time.Unix(int64(beUint64(member[10:18])), 0),
+		IsSitting: flags&flagSitting != 0,
+		Condition: packedConditionCSV[(flags>>1)&7],
+		Message:   member[18:],
 	}, nil
+}
+
+func putBEUint64(b []byte, v uint64) {
+	_ = b[7]
+	b[0] = byte(v >> 56)
+	b[1] = byte(v >> 48)
+	b[2] = byte(v >> 40)
+	b[3] = byte(v >> 32)
+	b[4] = byte(v >> 24)
+	b[5] = byte(v >> 16)
+	b[6] = byte(v >> 8)
+	b[7] = byte(v)
+}
+
+func beUint64(s string) uint64 {
+	_ = s[7]
+	return uint64(s[0])<<56 | uint64(s[1])<<48 | uint64(s[2])<<40 | uint64(s[3])<<32 |
+		uint64(s[4])<<24 | uint64(s[5])<<16 | uint64(s[6])<<8 | uint64(s[7])
 }
 
 func encodeConditionLatest(rec conditionRecord) string {
@@ -137,7 +190,10 @@ func insertIsuConditionsToValkey(ctx context.Context, jiaIsuUUID string, records
 	zkey := conditionZKey(jiaIsuUUID)
 	for i := range records {
 		rec := records[i]
-		member := encodeConditionMember(rec)
+		member, err := encodeConditionMember(rec)
+		if err != nil {
+			return err
+		}
 		cmds = append(cmds, valkeyClient.B().Zadd().Key(zkey).ScoreMember().ScoreMember(float64(rec.Timestamp.Unix()), member).Build())
 		if latest == nil || !rec.Timestamp.Before(latest.Timestamp) {
 			cp := rec
@@ -306,14 +362,14 @@ func getConditionsByTimeDesc(ctx context.Context, jiaIsuUUID string, endTime tim
 	// 余裕を持って多めに取り、呼び出し側で level フィルタする。
 	fetch := int64(conditionDescFetchCount(limit))
 	members, err := valkeyClient.Do(ctx,
-		valkeyClient.B().Zrevrangebyscore().Key(conditionZKey(jiaIsuUUID)).Max(max).Min(min).Withscores().Limit(int64(offset), fetch).Build(),
-	).AsZScores()
+		valkeyClient.B().Zrevrangebyscore().Key(conditionZKey(jiaIsuUUID)).Max(max).Min(min).Limit(int64(offset), fetch).Build(),
+	).AsStrSlice()
 	if err != nil {
 		return nil, err
 	}
 	out := make([]conditionRecord, 0, len(members))
-	for _, zs := range members {
-		rec, err := decodeConditionMember(zs.Member, zs.Score)
+	for _, member := range members {
+		rec, err := decodeConditionMember(member)
 		if err != nil {
 			return nil, err
 		}
@@ -326,14 +382,14 @@ func getConditionsByTimeAscRange(ctx context.Context, jiaIsuUUID string, start t
 	min := strconv.FormatInt(start.Unix(), 10)
 	max := "(" + strconv.FormatInt(end.Unix(), 10)
 	members, err := valkeyClient.Do(ctx,
-		valkeyClient.B().Zrangebyscore().Key(conditionZKey(jiaIsuUUID)).Min(min).Max(max).Withscores().Build(),
-	).AsZScores()
+		valkeyClient.B().Zrangebyscore().Key(conditionZKey(jiaIsuUUID)).Min(min).Max(max).Build(),
+	).AsStrSlice()
 	if err != nil {
 		return nil, err
 	}
 	out := make([]conditionRecord, 0, len(members))
-	for _, zs := range members {
-		rec, err := decodeConditionMember(zs.Member, zs.Score)
+	for _, member := range members {
+		rec, err := decodeConditionMember(member)
 		if err != nil {
 			return nil, err
 		}

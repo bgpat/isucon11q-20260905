@@ -13,11 +13,14 @@ func TestEncodeDecodeConditionMember(t *testing.T) {
 		Condition: "is_dirty=false,is_overweight=true,is_broken=false",
 		Message:   "hello",
 	}
-	member := encodeConditionMember(rec)
-	if strings.Count(member, "\x1e") != 3 {
-		t.Fatalf("member separators=%d want 3: %q", strings.Count(member, "\x1e"), member)
+	member, err := encodeConditionMember(rec)
+	if err != nil {
+		t.Fatal(err)
 	}
-	got, err := decodeConditionMember(member, float64(rec.Timestamp.Unix()))
+	if strings.Contains(member, "is_dirty=") || strings.Contains(member, "\x1e") {
+		t.Fatalf("member still looks like text: %q", member)
+	}
+	got, err := decodeConditionMember(member)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,6 +29,89 @@ func TestEncodeDecodeConditionMember(t *testing.T) {
 	}
 	if got.Timestamp.Unix() != rec.Timestamp.Unix() {
 		t.Fatalf("timestamp=%d want %d", got.Timestamp.Unix(), rec.Timestamp.Unix())
+	}
+	if got.Condition != packedConditionCSV[2] {
+		t.Fatalf("condition not interned: %q", got.Condition)
+	}
+}
+
+func TestEncodeDecodeConditionMemberEmptyMessage(t *testing.T) {
+	rec := conditionRecord{
+		Timestamp: time.Unix(1, 0),
+		IsSitting: false,
+		Condition: "is_dirty=false,is_overweight=false,is_broken=false",
+		Message:   "",
+	}
+	member, err := encodeConditionMember(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeConditionMember(member)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != rec {
+		t.Fatalf("got=%+v want=%+v", got, rec)
+	}
+}
+
+func TestEncodeConditionMemberRejectsInvalid(t *testing.T) {
+	_, err := encodeConditionMember(conditionRecord{
+		Timestamp: time.Unix(1, 0),
+		Condition: "bad",
+		Message:   "m",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestDecodeConditionMemberRejectsShort(t *testing.T) {
+	if _, err := decodeConditionMember(""); err == nil {
+		t.Fatal("expected error")
+	}
+	bad := string([]byte{conditionMemberVer1 + 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	if _, err := decodeConditionMember(bad); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestPackedConditionCSVMatchesParser(t *testing.T) {
+	for i, csv := range packedConditionCSV {
+		dirty, overweight, broken, ok := parseConditionFlags(csv)
+		if !ok {
+			t.Fatalf("csv[%d]=%q not parseable", i, csv)
+		}
+		var flags byte
+		if dirty {
+			flags |= flagDirty
+		}
+		if overweight {
+			flags |= flagOverweight
+		}
+		if broken {
+			flags |= flagBroken
+		}
+		if int(flags>>1) != i {
+			t.Fatalf("csv[%d] packed=%d", i, flags>>1)
+		}
+		rec := conditionRecord{
+			Timestamp: time.Unix(int64(i+1), 0),
+			IsSitting: i%2 == 0,
+			Condition: csv,
+			Message:   "m",
+		}
+		member, err := encodeConditionMember(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := decodeConditionMember(member)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Condition != csv || got.IsSitting != rec.IsSitting || got.Message != rec.Message || got.Timestamp.Unix() != rec.Timestamp.Unix() {
+			t.Fatalf("i=%d got=%+v want=%+v", i, got, rec)
+		}
 	}
 }
 
@@ -135,8 +221,14 @@ func TestConditionMembersAreUnique(t *testing.T) {
 		Condition: "is_dirty=false,is_overweight=false,is_broken=false",
 		Message:   "m",
 	}
-	a := encodeConditionMember(rec)
-	b := encodeConditionMember(rec)
+	a, err := encodeConditionMember(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := encodeConditionMember(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if a == b {
 		t.Fatalf("members should differ: %q", a)
 	}

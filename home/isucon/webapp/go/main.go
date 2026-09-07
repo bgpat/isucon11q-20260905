@@ -69,6 +69,7 @@ var (
 		sync.RWMutex
 		response []TrendResponse
 		valid    bool
+		gen      uint64
 	}
 	sessionCache struct {
 		sync.Mutex
@@ -93,13 +94,6 @@ var (
 		entries map[string]map[int64]map[string][]byte
 	}
 )
-
-func invalidateTrendCache() {
-	trendCache.Lock()
-	trendCache.valid = false
-	trendCache.response = nil
-	trendCache.Unlock()
-}
 
 func rememberIsuUUID(jiaIsuUUID string) {
 	isuUUIDCache.Store(jiaIsuUUID, struct{}{})
@@ -1467,16 +1461,23 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
-	// キャッシュミス時のDB再計算を1リクエストに限定する。
-	trendCache.Lock()
-	defer trendCache.Unlock()
-	if trendCache.valid {
-		res := trendCache.response
+	if res, ok := loadTrendCache(); ok {
 		return writeJSON(c, http.StatusOK, res)
 	}
 
+	// 再計算は trendComputeMu だけ直列化する。trendCache は持たないので
+	// POST /api/condition の invalidate は待たない。
+	trendComputeMu.Lock()
+	defer trendComputeMu.Unlock()
+	gen, res, hit := snapshotTrendCache()
+	if hit {
+		return writeJSON(c, http.StatusOK, res)
+	}
+
+	// postIsu は character 無しで INSERT してから JIA activate する。
+	// その間の trend 再計算が NULL を Scan しないよう除外する。
 	characterList := []Isu{}
-	err := db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
+	err := db.Select(&characterList, "SELECT `character` FROM `isu` WHERE `character` IS NOT NULL GROUP BY `character`")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1487,7 +1488,7 @@ func getTrend(c echo.Context) error {
 		JIAIsuUUID string `db:"jia_isu_uuid"`
 		Character  string `db:"character"`
 	}{}
-	err = db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu`")
+	err = db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu` WHERE `character` IS NOT NULL")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1557,7 +1558,7 @@ func getTrend(c echo.Context) error {
 		}
 	}
 
-	res := make([]TrendResponse, 0, len(characterList))
+	res = make([]TrendResponse, 0, len(characterList))
 	for _, character := range characterList {
 		res = append(res, TrendResponse{
 			Character: character.Character,
@@ -1566,9 +1567,7 @@ func getTrend(c echo.Context) error {
 			Critical:  critical[character.Character],
 		})
 	}
-	trendCache.response = res
-	trendCache.valid = true
-
+	storeTrendCache(gen, res)
 	return writeJSON(c, http.StatusOK, res)
 }
 
