@@ -53,6 +53,7 @@
 0755:1100:1100:home/isucon
 0755:0:0:home
 0644:0:0:home/isucon/.bashrc
+0644:0:0:home/isucon/.bashrc.backup
 0775:1100:1100:home/isucon/webapp/go
 0775:1100:1100:home/isucon/webapp
 0644:0:0:home/isucon/webapp/go/bind_json.go
