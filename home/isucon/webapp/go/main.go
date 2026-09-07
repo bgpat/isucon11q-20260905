@@ -1400,9 +1400,10 @@ func getIsuConditionsFromValkey(ctx context.Context, jiaIsuUUID string, endTime 
 	if fetchLimit < 64 {
 		fetchLimit = 64
 	}
-	cursorEnd := endTime
+	fetchCount := conditionDescFetchCount(fetchLimit)
+	offset := 0
 	for {
-		records, err := getConditionsByTimeDesc(ctx, jiaIsuUUID, cursorEnd, startTime, fetchLimit)
+		records, err := getConditionsByTimeDesc(ctx, jiaIsuUUID, endTime, startTime, offset, fetchLimit)
 		if err != nil {
 			return nil, err
 		}
@@ -1430,11 +1431,11 @@ func getIsuConditionsFromValkey(ctx context.Context, jiaIsuUUID string, endTime 
 				return conditionsResponse, nil
 			}
 		}
-		if len(records) < fetchLimit {
+		if len(records) < fetchCount {
 			return conditionsResponse, nil
 		}
-		// 同じ秒の残りを落とさないよう、最後の timestamp 未満へ進める。
-		cursorEnd = records[len(records)-1].Timestamp
+		// 同じ秒の残りを落とさないよう、end_time は固定して offset だけ進める。
+		offset += len(records)
 	}
 }
 

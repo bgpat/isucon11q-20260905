@@ -342,19 +342,27 @@ func getLatestConditionsFromValkey(ctx context.Context, uuids []string) (map[str
 	return out, nil
 }
 
-func getConditionsByTimeDesc(ctx context.Context, jiaIsuUUID string, endTime time.Time, startTime time.Time, limit int) ([]conditionRecord, error) {
+func conditionDescFetchCount(limit int) int {
+	n := limit * 4
+	if n < 64 {
+		return 64
+	}
+	return n
+}
+
+func getConditionsByTimeDesc(ctx context.Context, jiaIsuUUID string, endTime time.Time, startTime time.Time, offset, limit int) ([]conditionRecord, error) {
 	max := "(" + strconv.FormatInt(endTime.Unix(), 10)
 	min := "-inf"
 	if !startTime.IsZero() {
 		min = strconv.FormatInt(startTime.Unix(), 10)
 	}
-	// 余裕を持って多めに取り、呼び出し側で level フィルタする。
-	fetch := int64(limit * 4)
-	if fetch < 64 {
-		fetch = 64
+	if offset < 0 {
+		offset = 0
 	}
+	// 余裕を持って多めに取り、呼び出し側で level フィルタする。
+	fetch := int64(conditionDescFetchCount(limit))
 	members, err := valkeyClient.Do(ctx,
-		valkeyClient.B().Zrevrangebyscore().Key(conditionZKey(jiaIsuUUID)).Max(max).Min(min).Limit(0, fetch).Build(),
+		valkeyClient.B().Zrevrangebyscore().Key(conditionZKey(jiaIsuUUID)).Max(max).Min(min).Limit(int64(offset), fetch).Build(),
 	).AsStrSlice()
 	if err != nil {
 		return nil, err
