@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -91,4 +92,50 @@ func TestInvalidateTrendCacheMissesImmediately(t *testing.T) {
 	if _, ok := loadTrendCacheIfUsable(); ok {
 		t.Fatal("hard invalidate should miss")
 	}
+}
+
+func TestLoadTrendCacheReturnsStaleWhenDirtyExpired(t *testing.T) {
+	invalidateTrendCache()
+	t.Cleanup(invalidateTrendCache)
+
+	seedTrendCache([]TrendResponse{{Character: "stale"}})
+	markTrendCacheDirty()
+	trendComputedAt.Store(time.Now().Add(-trendRecomputeMinInterval - time.Millisecond).UnixNano())
+	if _, ok := loadTrendCacheIfUsable(); ok {
+		t.Fatal("expired dirty cache should not be usable")
+	}
+	got, ok := loadTrendCache()
+	if !ok || got[0].Character != "stale" {
+		t.Fatalf("stale cache should remain got=%v ok=%v", got, ok)
+	}
+}
+
+func TestTryScheduleTrendRefreshRunsOnce(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var n atomic.Int32
+	run := func() {
+		n.Add(1)
+		close(started)
+		<-release
+	}
+	tryScheduleTrendRefresh(run)
+	tryScheduleTrendRefresh(run)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("refresh did not start")
+	}
+	if n.Load() != 1 {
+		t.Fatalf("started %d want 1", n.Load())
+	}
+	close(release)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if !trendRefreshPending.Load() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("refresh pending stuck")
 }

@@ -9,10 +9,21 @@ import (
 const trendRecomputeMinInterval = 200 * time.Millisecond
 
 var (
-	trendComputeMu  sync.Mutex
-	trendDirty      atomic.Bool
-	trendComputedAt atomic.Int64
+	trendComputeMu      sync.Mutex
+	trendDirty          atomic.Bool
+	trendComputedAt     atomic.Int64
+	trendRefreshPending atomic.Bool
 )
+
+func tryScheduleTrendRefresh(run func()) {
+	if !trendRefreshPending.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer trendRefreshPending.Store(false)
+		run()
+	}()
+}
 
 func markTrendCacheDirty() {
 	trendDirty.Store(true)
