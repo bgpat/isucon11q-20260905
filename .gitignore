@@ -12,6 +12,12 @@
 /home/isucon/webapp/sql/*
 !/home/isucon/webapp/sql/0_Schema.sql
 !/home/isucon/webapp/sql/init.sh
+# /assets の事前圧縮ファイルだけ追跡する。元ファイルは Git に入れない
+!/home/isucon/webapp/public
+/home/isucon/webapp/public/*
+!/home/isucon/webapp/public/assets
+/home/isucon/webapp/public/assets/*
+!/home/isucon/webapp/public/assets/*.gz
 # 計測専用の pprof 設定とサービス設定
 !/etc
 /etc/*

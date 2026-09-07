@@ -69,6 +69,7 @@ var (
 		sync.RWMutex
 		response []TrendResponse
 		valid    bool
+		gen      uint64
 	}
 	sessionCache struct {
 		sync.Mutex
@@ -89,16 +90,10 @@ var (
 	iconFileCache sync.Map
 	graphCache    struct {
 		sync.Mutex
-		entries map[graphCacheKey][]byte
+		// jiaIsuUUID -> startUnix -> jiaUserID -> body
+		entries map[string]map[int64]map[string][]byte
 	}
 )
-
-func invalidateTrendCache() {
-	trendCache.Lock()
-	trendCache.valid = false
-	trendCache.response = nil
-	trendCache.Unlock()
-}
 
 func rememberIsuUUID(jiaIsuUUID string) {
 	isuUUIDCache.Store(jiaIsuUUID, struct{}{})
@@ -460,6 +455,7 @@ func init() {
 
 func main() {
 	e := echo.New()
+	e.Binder = jsonV2Binder{}
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
 	dropConditionLogger = e.Logger
@@ -1465,11 +1461,16 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
-	// キャッシュミス時のDB再計算を1リクエストに限定する。
-	trendCache.Lock()
-	defer trendCache.Unlock()
-	if trendCache.valid {
-		res := trendCache.response
+	if res, ok := loadTrendCache(); ok {
+		return writeJSON(c, http.StatusOK, res)
+	}
+
+	// 再計算は trendComputeMu だけ直列化する。trendCache は持たないので
+	// POST /api/condition の invalidate は待たない。
+	trendComputeMu.Lock()
+	defer trendComputeMu.Unlock()
+	gen, res, hit := snapshotTrendCache()
+	if hit {
 		return writeJSON(c, http.StatusOK, res)
 	}
 
@@ -1557,7 +1558,7 @@ func getTrend(c echo.Context) error {
 		}
 	}
 
-	res := make([]TrendResponse, 0, len(characterList))
+	res = make([]TrendResponse, 0, len(characterList))
 	for _, character := range characterList {
 		res = append(res, TrendResponse{
 			Character: character.Character,
@@ -1566,9 +1567,7 @@ func getTrend(c echo.Context) error {
 			Critical:  critical[character.Character],
 		})
 	}
-	trendCache.response = res
-	trendCache.valid = true
-
+	storeTrendCache(gen, res)
 	return writeJSON(c, http.StatusOK, res)
 }
 
@@ -1684,7 +1683,7 @@ func postIsuCondition(c echo.Context) error {
 	if jiaIsuUUID == "" {
 		return c.String(http.StatusBadRequest, "missing: jia_isu_uuid")
 	}
-	req := []PostIsuConditionRequest{}
+	req := make([]PostIsuConditionRequest, 0, postIsuConditionBindCap)
 	if err := c.Bind(&req); err != nil {
 		return c.String(http.StatusBadRequest, "bad request body")
 	} else if len(req) == 0 {
