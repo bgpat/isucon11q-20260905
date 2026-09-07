@@ -35,18 +35,18 @@ import (
 )
 
 const (
-	sessionName                 = "isucondition_go"
-	conditionLimit              = 20
-	frontendContentsPath        = "../public"
-	jiaJWTSigningKeyPath        = "../ec256-public.pem"
-	defaultIconFilePath         = "../NoImage.jpg"
-	isuIconCacheDir             = "/home/isucon/webapp/public/.isucondition-icon-cache"
-	isuIconInternalPath         = "/_isucondition_icon_cache/"
-	defaultJIAServiceURL        = "http://localhost:5000"
-	mysqlErrNumDuplicateEntry   = 1062
-	sessionCacheTTL             = 30 * time.Second
-	sessionCacheMaxEntries      = 10000
-	dropConditionLogIdle        = 10 * time.Second
+	sessionName               = "isucondition_go"
+	conditionLimit            = 20
+	frontendContentsPath      = "../public"
+	jiaJWTSigningKeyPath      = "../ec256-public.pem"
+	defaultIconFilePath       = "../NoImage.jpg"
+	isuIconCacheDir           = "/home/isucon/webapp/public/.isucondition-icon-cache"
+	isuIconInternalPath       = "/_isucondition_icon_cache/"
+	defaultJIAServiceURL      = "http://localhost:5000"
+	mysqlErrNumDuplicateEntry = 1062
+	sessionCacheTTL           = 30 * time.Second
+	sessionCacheMaxEntries    = 10000
+	dropConditionLogIdle      = 10 * time.Second
 	// #165: 10% 刻み二分探索。最初の2点は端の 0% と中点の 40%。
 	dropConditionProbability    = 0.0
 	conditionLevelInfo          = "info"
@@ -1485,21 +1485,54 @@ func getTrend(c echo.Context) error {
 	if res, ok := loadTrendCacheIfUsable(); ok {
 		return writeJSON(c, http.StatusOK, res)
 	}
+	if res, ok := loadTrendCache(); ok {
+		tryScheduleTrendRefresh(refreshTrendCache)
+		return writeJSON(c, http.StatusOK, res)
+	}
 
 	trendComputeMu.Lock()
 	defer trendComputeMu.Unlock()
 	if res, ok := loadTrendCacheIfUsable(); ok {
 		return writeJSON(c, http.StatusOK, res)
 	}
+	if res, ok := loadTrendCache(); ok {
+		tryScheduleTrendRefresh(refreshTrendCache)
+		return writeJSON(c, http.StatusOK, res)
+	}
 	gen, _, _ := snapshotTrendCache()
+	res, err := computeTrend(c.Request().Context())
+	if err != nil {
+		c.Logger().Errorf("%v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	storeTrendCache(gen, res)
+	return writeJSON(c, http.StatusOK, res)
+}
 
+func refreshTrendCache() {
+	trendComputeMu.Lock()
+	defer trendComputeMu.Unlock()
+	if _, ok := loadTrendCacheIfUsable(); ok {
+		return
+	}
+	gen, _, _ := snapshotTrendCache()
+	res, err := computeTrend(context.Background())
+	if err != nil {
+		if dropConditionLogger != nil {
+			dropConditionLogger.Errorf("trend refresh: %v", err)
+		}
+		return
+	}
+	storeTrendCache(gen, res)
+}
+
+func computeTrend(ctx context.Context) ([]TrendResponse, error) {
 	// postIsu は character 無しで INSERT してから JIA activate する。
 	// その間の trend 再計算が NULL を Scan しないよう除外する。
 	characterList := []Isu{}
 	err := db.Select(&characterList, "SELECT `character` FROM `isu` WHERE `character` IS NOT NULL GROUP BY `character`")
 	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
+		return nil, fmt.Errorf("db error: %w", err)
 	}
 
 	isuRows := []struct {
@@ -1509,17 +1542,15 @@ func getTrend(c echo.Context) error {
 	}{}
 	err = db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu` WHERE `character` IS NOT NULL")
 	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
+		return nil, fmt.Errorf("db error: %w", err)
 	}
 	uuids := make([]string, 0, len(isuRows))
 	for _, row := range isuRows {
 		uuids = append(uuids, row.JIAIsuUUID)
 	}
-	latestByUUID, err := getLatestConditionsFromValkey(c.Request().Context(), uuids)
+	latestByUUID, err := getLatestConditionsFromValkey(ctx, uuids)
 	if err != nil {
-		c.Logger().Errorf("valkey error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
+		return nil, fmt.Errorf("valkey error: %w", err)
 	}
 
 	info := map[string][]*TrendCondition{}
@@ -1563,8 +1594,7 @@ func getTrend(c echo.Context) error {
 	for _, row := range items {
 		conditionLevel, err := calculateConditionLevel(row.condition)
 		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
+			return nil, err
 		}
 		trendCondition := &TrendCondition{ID: row.id, Timestamp: row.timestamp}
 		switch conditionLevel {
@@ -1586,8 +1616,7 @@ func getTrend(c echo.Context) error {
 			Critical:  critical[character.Character],
 		})
 	}
-	storeTrendCache(gen, res)
-	return writeJSON(c, http.StatusOK, res)
+	return res, nil
 }
 
 func noteDroppedIsuCondition() {
