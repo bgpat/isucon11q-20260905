@@ -9,7 +9,7 @@ import (
 
 const (
 	defaultTrendFailAfterSec = 5.0
-	defaultTrendFailCount    = 21
+	defaultTrendFailCount    = 20
 )
 
 var (
