@@ -47,8 +47,8 @@ const (
 	sessionCacheTTL             = 30 * time.Second
 	sessionCacheMaxEntries      = 10000
 	dropConditionLogIdle        = 10 * time.Second
-	// #310: trend 200 時の drop 再測。20% を先に測る。
-	dropConditionProbability    = 0.2
+	// #310: trend 200 時の drop 再測。20% の次に 40%。
+	dropConditionProbability    = 0.4
 	conditionLevelInfo          = "info"
 	conditionLevelWarning       = "warning"
 	conditionLevelCritical      = "critical"
