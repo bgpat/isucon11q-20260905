@@ -66,7 +66,16 @@ git add -f *.go
 
 保存済み baseline/candidate の後処理は使い捨てスクリプトを作らず、次の定型コマンドを使う。
 各入力は `bench.log`、`timing.json`（commit/load/end）、`slow.log.gz`、`cpu.pprof`、
-`prometheus-cpu.json`、`db-before.txt`、`db-after.txt` を含む収集ディレクトリ。
+`prometheus-cpu.json`、`db-before.txt`、`db-after.txt`、
+`valkey-before.txt`、`valkey-after.txt` を含む収集ディレクトリ。
+Valkey スナップショットは Valkey が listen しているホストで LOAD の外に取る。
+
+```sh
+ssh root@isucon1 'make -C / collect-valkey' > /tmp/isucon-work/current/valkey-before.txt
+ssh root@isucon1 'make -C / reset-valkey-stats'
+# ベンチ
+ssh root@isucon1 'make -C / collect-valkey' > /tmp/isucon-work/current/valkey-after.txt
+```
 
 ```sh
 sh ops/benchmark-assets.sh time report -- python3 ops/benchmark-report.py --baseline /tmp/isucon-work/baseline --candidate /tmp/isucon-work/candidate --pr 233 --issue 226 --tag benchmark-TIMESTAMP-score-SCORE
@@ -92,7 +101,7 @@ CPU は instance ごとに区別し、移動rateの積分による推定値と�
 申請できる。これは自動許可を保証せず、内部コマンドにも実行環境の承認規則が適用される。
 
 ```sh
-python3 -m unittest discover -s ops -p test_benchmark_report.py
+python3 -m unittest discover -s ops -p 'test_*.py'
 ```
 
 各処理をローカルの `time` サブコマンドで囲み、開始・終了・経過秒・終了コードを記録する。

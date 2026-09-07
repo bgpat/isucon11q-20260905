@@ -23,7 +23,8 @@ Issue に記録した全競技サーバー。
 
 # 作業
 
-- デバッグログ、詳細ログ、pprof、slow query log などの計測機能を確認する。
+- デバッグログ、詳細ログ、pprof、slow query log、Valkey スナップショットなどの計測機能を確認する。
+- Valkey の `collect-valkey` / `reset-valkey-stats` はベンチ前後だけ使う。LOAD 中に走らせない。valkey.conf の slowlog 閾値は変えない。提出用では取得を省略してよい。
 - 各機能を無効化する変更をローカルで作成する。
 - `git pull` で競技サーバーへ同期する。
 - 無効化後のサービス状態を確認する。

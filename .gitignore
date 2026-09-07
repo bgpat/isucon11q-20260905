@@ -33,3 +33,6 @@
 !/ops/benchmark-report.py
 !/ops/benchmark_sql.py
 !/ops/test_benchmark_report.py
+!/ops/collect-valkey.sh
+!/ops/valkey_metrics.py
+!/ops/test_valkey_metrics.py

@@ -161,6 +161,16 @@ install-valkey:
 	test "$$(id -u)" -eq 0
 	/ops/install-valkey.sh
 
+.PHONY: collect-valkey
+collect-valkey:
+	test "$$(id -u)" -eq 0
+	/ops/collect-valkey.sh snapshot
+
+.PHONY: reset-valkey-stats
+reset-valkey-stats:
+	test "$$(id -u)" -eq 0
+	/ops/collect-valkey.sh reset
+
 # Override LOG_FILES with paths confirmed on the target server. Do not add
 # unconfirmed server-specific paths here.
 LOG_ARCHIVE_ROOT ?= /var/log/archive
