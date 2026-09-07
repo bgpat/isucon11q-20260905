@@ -1396,10 +1396,8 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 func getIsuConditionsFromValkey(ctx context.Context, jiaIsuUUID string, endTime time.Time, conditionLevel map[string]interface{}, startTime time.Time,
 	limit int, isuName string) ([]*GetIsuConditionResponse, error) {
 	conditionsResponse := make([]*GetIsuConditionResponse, 0, limit)
-	fetchLimit := limit * 8
-	if fetchLimit < 64 {
-		fetchLimit = 64
-	}
+	// level フィルタ用に多めに取る。getConditionsByTimeDesc 側では倍にしない。
+	fetchLimit := conditionListFetchLimit(limit)
 	cursorEnd := endTime
 	for {
 		records, err := getConditionsByTimeDesc(ctx, jiaIsuUUID, cursorEnd, startTime, fetchLimit)
