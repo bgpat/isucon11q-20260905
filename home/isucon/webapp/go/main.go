@@ -955,7 +955,8 @@ func postIsu(c echo.Context) error {
 	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
 		c.Logger().Errorf("failed to cache icon: %v", err)
 	}
-	invalidateTrendCache()
+	// 新規 ISU でもキャッシュを消さず dirty にする。hard invalidate は initialize のみ。
+	markTrendCacheDirty()
 
 	return writeJSON(c, http.StatusCreated, isu)
 }
