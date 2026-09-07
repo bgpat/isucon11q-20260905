@@ -613,6 +613,7 @@ func postInitialize(c echo.Context) error {
 		c.Logger().Errorf("failed to clear icon cache: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	resetTrendFail(time.Now())
 
 	return writeJSON(c, http.StatusOK, InitializeResponse{
 		Language: "go",
@@ -1461,6 +1462,9 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
+	if shouldFailTrend(time.Now()) {
+		return c.NoContent(http.StatusInternalServerError)
+	}
 	if res, ok := loadTrendCache(); ok {
 		return writeJSON(c, http.StatusOK, res)
 	}
