@@ -87,6 +87,23 @@ class ValkeyMetricsTest(unittest.TestCase):
         by_name = {row['command']: row for row in result['commands']}
         self.assertEqual(by_name['zadd']['calls'], 30)
 
+    def test_reset_detected_when_only_low_volume_commands_drop(self):
+        before = """=== INFO all ===
+total_commands_processed:300
+cmdstat_ping:calls=176,usec=152,usec_per_call=0.86,rejected_calls=0,failed_calls=0
+cmdstat_zadd:calls=0,usec=0,usec_per_call=0.00,rejected_calls=0,failed_calls=0
+"""
+        after = """=== INFO all ===
+total_commands_processed:1066909
+cmdstat_ping:calls=155,usec=120,usec_per_call=0.77,rejected_calls=0,failed_calls=0
+cmdstat_zadd:calls=762775,usec=1492746,usec_per_call=1.96,rejected_calls=0,failed_calls=0
+"""
+        result = analyze(before, after)
+        self.assertTrue(result['reset'])
+        by_name = {row['command']: row for row in result['commands']}
+        self.assertEqual(by_name['zadd']['calls'], 762775)
+        self.assertEqual(by_name['ping']['calls'], 155)
+
     def test_empty_after_is_error(self):
         with self.assertRaises(ValueError):
             analyze(BEFORE, '')

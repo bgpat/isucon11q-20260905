@@ -159,7 +159,13 @@ def analyze(before_text, after_text):
         info={}, commands={}, zcards=[], latest_keys=None, slowlog_len=None)
     before_total = _number(before['info'].get('total_commands_processed')) or 0
     after_total = _number(after['info'].get('total_commands_processed')) or 0
-    reset = bool(before['commands'] or before_total) and after_total < before_total
+    reset = after_total < before_total
+    if not reset:
+        for name, old in before['commands'].items():
+            new = after['commands'].get(name)
+            if new and (new['calls'] < old['calls'] or new['usec'] < old['usec']):
+                reset = True
+                break
     cards = after['zcards']
     return dict(
         reset=reset,
