@@ -35,18 +35,18 @@ import (
 )
 
 const (
-	sessionName                 = "isucondition_go"
-	conditionLimit              = 20
-	frontendContentsPath        = "../public"
-	jiaJWTSigningKeyPath        = "../ec256-public.pem"
-	defaultIconFilePath         = "../NoImage.jpg"
-	isuIconCacheDir             = "/home/isucon/webapp/public/.isucondition-icon-cache"
-	isuIconInternalPath         = "/_isucondition_icon_cache/"
-	defaultJIAServiceURL        = "http://localhost:5000"
-	mysqlErrNumDuplicateEntry   = 1062
-	sessionCacheTTL             = 30 * time.Second
-	sessionCacheMaxEntries      = 10000
-	dropConditionLogIdle        = 10 * time.Second
+	sessionName               = "isucondition_go"
+	conditionLimit            = 20
+	frontendContentsPath      = "../public"
+	jiaJWTSigningKeyPath      = "../ec256-public.pem"
+	defaultIconFilePath       = "../NoImage.jpg"
+	isuIconCacheDir           = "/home/isucon/webapp/public/.isucondition-icon-cache"
+	isuIconInternalPath       = "/_isucondition_icon_cache/"
+	defaultJIAServiceURL      = "http://localhost:5000"
+	mysqlErrNumDuplicateEntry = 1062
+	sessionCacheTTL           = 30 * time.Second
+	sessionCacheMaxEntries    = 10000
+	dropConditionLogIdle      = 10 * time.Second
 	// #165: 10% 刻み二分探索。最初の2点は端の 0% と中点の 40%。
 	dropConditionProbability    = 0.0
 	conditionLevelInfo          = "info"
@@ -76,10 +76,11 @@ var (
 		entries     map[string]sessionCacheEntry
 		nextCleanup time.Time
 	}
-	dropConditionPending uint64
-	dropConditionTotal   uint64
-	dropConditionLogger  echo.Logger
-	prettyJSONBufPool    = sync.Pool{
+	dropConditionPending  uint64
+	dropConditionTotal    uint64
+	dropConditionLogger   echo.Logger
+	isuRegisterLogEnabled bool
+	prettyJSONBufPool     = sync.Pool{
 		New: func() interface{} {
 			return new(bytes.Buffer)
 		},
@@ -425,6 +426,13 @@ func getEnv(key string, defaultValue string) string {
 	return defaultValue
 }
 
+func logIsuRegister(c echo.Context, format string, args ...interface{}) {
+	if !isuRegisterLogEnabled {
+		return
+	}
+	c.Logger().Infof(format, args...)
+}
+
 func NewMySQLConnectionEnv() *MySQLConnectionEnv {
 	return &MySQLConnectionEnv{
 		Host:     getEnv("MYSQL_HOST", "127.0.0.1"),
@@ -458,6 +466,7 @@ func main() {
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
 	dropConditionLogger = e.Logger
+	isuRegisterLogEnabled = getEnv("ENABLE_ISU_REGISTER_LOG", "0") == "1"
 	startDropConditionLogFlusher()
 
 	e.Use(middleware.Logger())
@@ -672,6 +681,7 @@ func postAuthentication(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
+	logIsuRegister(c, "api/auth jia_user_id=%s", jiaUserID)
 	return c.NoContent(http.StatusOK)
 }
 
@@ -848,6 +858,7 @@ func postIsu(c echo.Context) error {
 		mysqlErr, ok := err.(*mysql.MySQLError)
 
 		if ok && mysqlErr.Number == uint16(mysqlErrNumDuplicateEntry) {
+			logIsuRegister(c, "api/isu conflict jia_user_id=%s jia_isu_uuid=%s", jiaUserID, jiaIsuUUID)
 			return c.String(http.StatusConflict, "duplicated: isu")
 		}
 
@@ -937,6 +948,7 @@ func postIsu(c echo.Context) error {
 	}
 	invalidateTrendCache()
 
+	logIsuRegister(c, "api/isu created jia_user_id=%s jia_isu_uuid=%s", jiaUserID, jiaIsuUUID)
 	return writeJSON(c, http.StatusCreated, isu)
 }
 
