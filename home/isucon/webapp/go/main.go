@@ -455,6 +455,7 @@ func init() {
 
 func main() {
 	e := echo.New()
+	e.Binder = jsonV2Binder{}
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
 	dropConditionLogger = e.Logger
@@ -1683,7 +1684,7 @@ func postIsuCondition(c echo.Context) error {
 	if jiaIsuUUID == "" {
 		return c.String(http.StatusBadRequest, "missing: jia_isu_uuid")
 	}
-	req := []PostIsuConditionRequest{}
+	req := make([]PostIsuConditionRequest, 0, postIsuConditionBindCap)
 	if err := c.Bind(&req); err != nil {
 		return c.String(http.StatusBadRequest, "bad request body")
 	} else if len(req) == 0 {
