@@ -99,6 +99,14 @@ func rememberIsuMeta(m isuMeta) {
 	isuMetas.store(m)
 }
 
+func forgetIsuMeta(jiaIsuUUID string) {
+	isuMetas.Lock()
+	defer isuMetas.Unlock()
+	if isuMetas.byUUID != nil {
+		delete(isuMetas.byUUID, jiaIsuUUID)
+	}
+}
+
 func listIsuMetaByUser(jiaUserID string) ([]isuMeta, error) {
 	if metas, ok := isuMetas.list(jiaUserID); ok {
 		return metas, nil
