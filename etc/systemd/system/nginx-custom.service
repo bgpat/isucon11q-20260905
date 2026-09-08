@@ -1,15 +1,16 @@
 [Unit]
-Description=nginx 1.30.4 custom (OpenSSL 3.5.8)
+Description=nginx 1.30.4 custom (OpenSSL 3.5.8 kTLS)
 Documentation=http://nginx.org/en/docs/
 After=network.target
 Conflicts=nginx.service
 
 [Service]
 Type=forking
-PIDFile=/run/nginx-custom.pid
-ExecStartPre=/opt/nginx-1.30.4/sbin/nginx -t -q -g 'daemon on; master_process on;'
-ExecStart=/opt/nginx-1.30.4/sbin/nginx -g 'daemon on; master_process on;'
-ExecReload=/opt/nginx-1.30.4/sbin/nginx -g 'daemon on; master_process on;' -s reload
+PIDFile=/run/nginx.pid
+ExecStartPre=/sbin/modprobe tls
+ExecStartPre=/opt/nginx-1.30.4/sbin/nginx -t -q -c /etc/nginx-custom/nginx.conf -g 'daemon on; master_process on;'
+ExecStart=/opt/nginx-1.30.4/sbin/nginx -c /etc/nginx-custom/nginx.conf -g 'daemon on; master_process on;'
+ExecReload=/opt/nginx-1.30.4/sbin/nginx -c /etc/nginx-custom/nginx.conf -g 'daemon on; master_process on;' -s reload
 ExecStop=-/bin/kill -s QUIT $MAINPID
 TimeoutStopSec=5
 KillMode=mixed

@@ -74,4 +74,12 @@ isucon1 の HEAD は `perf/issue-325-condition-fetch-limit-master` の `e540dd1`
 
 `make install` が `/etc/nginx/` に `*.default` と `koi-utf` / `koi-win` / `win-utf` を追加した。`nginx.conf` 本体は上書きしていない。Git 作業ツリーは clean のまま。
 
-443 の切り替えとベンチは未実施。
+443 の切り替えは未実施。
+
+isucon2 / isucon3（2026-09-08 09:46–09:49 JST）も同じ手順で投入した。HEAD はいずれも `e540dd1` のまま。現行 1.18.0 は active、カスタム 1.30.4 / OpenSSL 3.5.8 は inactive / disabled。`nginx -t` は deprecated warn のみで成功。
+
+isucon1 ベンチ（現行 1.18.0 のまま、LOAD 09:46:30–09:47:30）: score **7,741,656** pass（7,741,714 − 58、timeout 0）。ERR は unauth 200 が 24、trend 500 が 21、HTTP/2 force closed が 10、broken pipe が 3。mismatch は 0。
+
+## kTLS 再ビルド（2026-09-08 21:00 頃）
+
+3 台とも `/opt/nginx-1.30.4` を `enable-ktls`、`-O3 -march=native`、`--with-file-aio` で組み直した。`ssl_conf_command Options KTLS;` は `/etc/nginx-custom/nginx.conf` のみ。共有の `/etc/nginx/nginx.conf` には書いていない。443 は付属 1.18.0 のまま。`SSL_sendfile` あり。`nginx-custom` は inactive / disabled。
