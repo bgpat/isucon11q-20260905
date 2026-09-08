@@ -58,3 +58,11 @@
 /etc/*
 !/etc/sudoers
 
+# /etc/mysql/my.cnf
+/*
+!/etc
+/etc/*
+!/etc/mysql
+/etc/mysql/*
+!/etc/mysql/my.cnf
+
