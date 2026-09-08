@@ -28,3 +28,5 @@ root	ALL=(ALL:ALL) ALL
 # See sudoers(5) for more information on "#include" directives:
 
 #includedir /etc/sudoers.d
+Defaults	env_keep+="GIT_AUTHOR_NAME"
+Defaults	env_keep+="GIT_AUTHOR_EMAIL"

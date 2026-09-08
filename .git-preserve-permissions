@@ -27,9 +27,12 @@
 0755:0:0:etc/prometheus
 0644:0:0:etc/prometheus/hosts.json
 0644:0:0:etc/prometheus/prometheus.yml
+0440:0:0:etc/sudoers
 0755:0:0:etc/systemd/system
 0755:0:0:etc/systemd
 0644:0:0:etc/systemd/system/isucondition.go.service
+0755:0:0:etc/systemd/system/multi-user.target.wants
+0644:0:0:etc/systemd/system/nginx-custom.service
 0644:0:0:etc/systemd/system/valkey.service
 0755:0:0:etc/valkey
 0644:0:0:etc/valkey/valkey.conf
@@ -76,6 +79,7 @@
 0644:0:0:home/isucon/webapp/go/main.go
 0644:0:0:home/isucon/webapp/go/trend_cache.go
 0644:0:0:home/isucon/webapp/go/trend_cache_test.go
+0644:0:0:home/isucon/webapp/go/unix_listen_test.go
 0775:1100:1100:home/isucon/webapp/public/assets
 0775:1100:1100:home/isucon/webapp/public
 0644:0:0:home/isucon/webapp/public/assets/favicon.d0f5f504.svg.gz
@@ -99,6 +103,7 @@
 0644:0:0:ops/benchmark-report.py
 0644:0:0:ops/benchmark_sql.py
 0755:0:0:ops/install-go.sh
+0755:0:0:ops/install-nginx-custom.sh
 0755:0:0:ops/install-valkey.sh
 0644:0:0:ops/test_benchmark_report.py
 0700:0:0:root/.ssh
@@ -115,6 +120,7 @@
 0644:0:0:tasks/final-benchmark.md
 0644:0:0:tasks/freeze.md
 0644:0:0:tasks/initialize-servers.md
+0644:0:0:tasks/install-nginx-custom.md
 0644:0:0:tasks/mariadb-11.4-upgrade.md
 0644:0:0:tasks/nginx-1.30.4-upgrade.md
 0644:0:0:tasks/prepare-access-log.md
