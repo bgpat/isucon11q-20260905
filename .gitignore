@@ -39,3 +39,11 @@
 !/ops/benchmark-report.py
 !/ops/benchmark_sql.py
 !/ops/test_benchmark_report.py
+# /home/isucon/.bashrc.backup
+/*
+!/home
+/home/*
+!/home/isucon
+/home/isucon/*
+!/home/isucon/.bashrc.backup
+
