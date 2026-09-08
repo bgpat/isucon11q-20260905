@@ -1427,11 +1427,15 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 func getIsuConditionsFromValkey(ctx context.Context, jiaIsuUUID string, endTime time.Time, conditionLevel map[string]interface{}, startTime time.Time,
 	limit int, isuName string) ([]*GetIsuConditionResponse, error) {
 	conditionsResponse := make([]*GetIsuConditionResponse, 0, limit)
-	// 全レベル指定ならフィルタで落ちないので limit 件。一部指定だけ *8 する。
-	fetchLimit := conditionListFetchCount(limit, conditionLevel)
+	// level 別 ZSET から取るので、指定 level の LIMIT は応答件数と同じ。
+	fetchLimit := limit
+	if fetchLimit < 1 {
+		fetchLimit = 1
+	}
+	levels := conditionLevelsFromMap(conditionLevel)
 	cursorEnd := endTime
 	for {
-		records, err := getConditionsByTimeDesc(ctx, jiaIsuUUID, cursorEnd, startTime, fetchLimit)
+		records, err := getConditionsByTimeDesc(ctx, jiaIsuUUID, cursorEnd, startTime, fetchLimit, levels)
 		if err != nil {
 			return nil, err
 		}
