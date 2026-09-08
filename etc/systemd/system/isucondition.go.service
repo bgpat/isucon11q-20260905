@@ -8,7 +8,10 @@ EnvironmentFile=/home/isucon/env.sh
 EnvironmentFile=-/etc/isucondition-observability.env
 
 User=isucon
-Group=isucon
+Group=www-data
+RuntimeDirectory=isucondition
+RuntimeDirectoryMode=0750
+Environment=SERVER_UNIX_SOCKET=/run/isucondition/isucondition.sock
 ExecStart=/home/isucon/webapp/go/isucondition
 
 Restart   = always

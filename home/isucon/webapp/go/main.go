@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -453,6 +454,24 @@ func init() {
 	}
 }
 
+func listenUnixSocket(path string) (net.Listener, error) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if unixListener, ok := listener.(*net.UnixListener); ok {
+		unixListener.SetUnlinkOnClose(true)
+	}
+	if err := os.Chmod(path, 0660); err != nil {
+		listener.Close()
+		return nil, err
+	}
+	return listener, nil
+}
+
 func main() {
 	e := echo.New()
 	e.Binder = jsonV2Binder{}
@@ -509,6 +528,17 @@ func main() {
 	postIsuConditionTargetBaseURL = os.Getenv("POST_ISUCONDITION_TARGET_BASE_URL")
 	if postIsuConditionTargetBaseURL == "" {
 		e.Logger.Fatalf("missing: POST_ISUCONDITION_TARGET_BASE_URL")
+		return
+	}
+
+	if socketPath := os.Getenv("SERVER_UNIX_SOCKET"); socketPath != "" {
+		listener, err := listenUnixSocket(socketPath)
+		if err != nil {
+			e.Logger.Fatalf("failed to listen unix socket: %v", err)
+			return
+		}
+		e.Listener = listener
+		e.Logger.Fatal(e.Start(""))
 		return
 	}
 
