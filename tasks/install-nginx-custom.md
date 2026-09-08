@@ -59,4 +59,19 @@ systemctl start nginx.service
 
 ## 実行結果
 
-未実施。
+実施済み（2026-09-08 09:40–09:43 JST、isucon1）。
+
+isucon1 の HEAD は `perf/issue-325-condition-fetch-limit-master` の `e540dd1` のままにした。実験ブランチを切り替えず、`origin/infra/issue-344-nginx-custom` から install スクリプトと unit だけ取り出した。
+
+| 確認項目 | 結果 |
+| --- | --- |
+| `/usr/sbin/nginx -v` | `nginx/1.18.0 (Ubuntu)` |
+| カスタム `/opt/nginx-1.30.4/sbin/nginx -V` | `nginx/1.30.4`、`OpenSSL 3.5.8 25 Aug 2026`、`--with-debug` なし |
+| カスタム `nginx -t` | 成功。`listen ... http2` は deprecated の warn のみ |
+| `nginx.service` | active / enabled |
+| `nginx-custom.service` | inactive / disabled |
+| 443 | ビルド前と同じ PID（25884/111324/111325） |
+
+`make install` が `/etc/nginx/` に `*.default` と `koi-utf` / `koi-win` / `win-utf` を追加した。`nginx.conf` 本体は上書きしていない。Git 作業ツリーは clean のまま。
+
+443 の切り替えとベンチは未実施。
