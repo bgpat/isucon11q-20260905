@@ -9,11 +9,13 @@ import (
 
 const (
 	defaultTrendFailAfterSec = 5.0
-	defaultTrendFailCount    = 10
+	defaultTrendFailForSec   = 5.0
+	defaultTrendFailCount    = 45
 )
 
 var (
 	trendFailAfter  time.Duration
+	trendFailFor    time.Duration
 	trendFailBudget int64
 	trendFailAtNano atomic.Int64
 	trendFailLeft   atomic.Int64
@@ -21,6 +23,7 @@ var (
 
 func init() {
 	trendFailAfter = durationFromEnvSec("TREND_FAIL_AFTER_SEC", defaultTrendFailAfterSec)
+	trendFailFor = durationFromEnvSec("TREND_FAIL_FOR_SEC", defaultTrendFailForSec)
 	trendFailBudget = int64FromEnv("TREND_FAIL_COUNT", defaultTrendFailCount)
 }
 
@@ -61,7 +64,11 @@ func shouldFailTrend(now time.Time) bool {
 	if at == 0 {
 		return false
 	}
-	if now.UnixNano()-at < int64(trendFailAfter) {
+	elapsed := now.UnixNano() - at
+	if elapsed < int64(trendFailAfter) {
+		return false
+	}
+	if trendFailFor > 0 && elapsed >= int64(trendFailAfter+trendFailFor) {
 		return false
 	}
 	for {
