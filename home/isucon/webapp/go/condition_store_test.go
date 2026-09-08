@@ -173,6 +173,47 @@ func TestDefaultValkeyAddrUsesEnv(t *testing.T) {
 	}
 }
 
+func TestValkeyAddrForHost(t *testing.T) {
+	if got := valkeyAddrForHost(isucon1Hostname); got != valkeyUnixSocketPath {
+		t.Fatalf("isucon1 addr=%q", got)
+	}
+	if got := valkeyAddrForHost(isucon1Hostname + ".ap-northeast-1.compute.internal"); got != valkeyUnixSocketPath {
+		t.Fatalf("fqdn addr=%q", got)
+	}
+	if got := valkeyAddrForHost("ip-192-168-0-12"); got != isucon1Hostname+":6379" {
+		t.Fatalf("isucon2 addr=%q", got)
+	}
+}
+
+func TestValkeyClientOptionUnix(t *testing.T) {
+	opt, err := valkeyClientOption(valkeyUnixSocketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opt.DialCtxFn == nil {
+		t.Fatal("unix socket needs DialCtxFn")
+	}
+	if len(opt.InitAddress) != 1 || opt.InitAddress[0] != valkeyUnixSocketPath {
+		t.Fatalf("InitAddress=%v", opt.InitAddress)
+	}
+	if !opt.DisableCache {
+		t.Fatal("DisableCache")
+	}
+}
+
+func TestValkeyClientOptionTCP(t *testing.T) {
+	opt, err := valkeyClientOption("127.0.0.1:6379")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opt.DialCtxFn != nil {
+		t.Fatal("tcp should not set DialCtxFn")
+	}
+	if len(opt.InitAddress) != 1 || opt.InitAddress[0] != "127.0.0.1:6379" {
+		t.Fatalf("InitAddress=%v", opt.InitAddress)
+	}
+}
+
 func TestConditionMembersAreUnique(t *testing.T) {
 	rec := conditionRecord{
 		Timestamp: time.Unix(1, 0),

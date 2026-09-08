@@ -147,6 +147,7 @@ deploy-app:
 		systemctl enable valkey.service; \
 		systemctl restart valkey.service; \
 		systemctl is-active --quiet valkey.service; \
+		/usr/local/bin/valkey-cli -s /run/valkey/valkey.sock ping | grep -qx PONG; \
 	else \
 		systemctl disable --now valkey.service; \
 	fi

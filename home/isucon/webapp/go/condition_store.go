@@ -18,6 +18,7 @@ const (
 	conditionLatestKeyPrefix = "cond:latest:"
 	conditionKeyScanMatch    = "cond:*"
 	isucon1Hostname          = "ip-192-168-0-11"
+	valkeyUnixSocketPath     = "/run/valkey/valkey.sock"
 	conditionListFetchFactor = 8
 	conditionListFetchMin    = 64
 	conditionMemberVer1      = 1
@@ -65,25 +66,49 @@ type conditionRecord struct {
 	Message   string
 }
 
-func defaultValkeyAddr() string {
-	if addr := os.Getenv("VALKEY_ADDR"); addr != "" {
-		return addr
-	}
-	host, err := os.Hostname()
-	if err == nil {
-		if host == isucon1Hostname || strings.HasPrefix(host, isucon1Hostname+".") {
-			return "127.0.0.1:6379"
-		}
+func valkeyAddrForHost(host string) string {
+	if host == isucon1Hostname || strings.HasPrefix(host, isucon1Hostname+".") {
+		return valkeyUnixSocketPath
 	}
 	// isucondition-1.t.isucon.dev は全台で 127.0.0.11 に向くため、isucon1 の hostname を使う。
 	return isucon1Hostname + ":6379"
 }
 
-func initValkeyClient() error {
-	client, err := valkey.NewClient(valkey.ClientOption{
-		InitAddress:  []string{defaultValkeyAddr()},
+func defaultValkeyAddr() string {
+	if addr := os.Getenv("VALKEY_ADDR"); addr != "" {
+		return addr
+	}
+	host, err := os.Hostname()
+	if err != nil {
+		return isucon1Hostname + ":6379"
+	}
+	return valkeyAddrForHost(host)
+}
+
+func valkeyClientOption(addr string) (valkey.ClientOption, error) {
+	if strings.HasPrefix(addr, "/") {
+		addr = "unix://" + addr
+	}
+	if strings.HasPrefix(addr, "unix://") {
+		opt, err := valkey.ParseURL(addr)
+		if err != nil {
+			return opt, err
+		}
+		opt.DisableCache = true
+		return opt, nil
+	}
+	return valkey.ClientOption{
+		InitAddress:  []string{addr},
 		DisableCache: true,
-	})
+	}, nil
+}
+
+func initValkeyClient() error {
+	opt, err := valkeyClientOption(defaultValkeyAddr())
+	if err != nil {
+		return err
+	}
+	client, err := valkey.NewClient(opt)
 	if err != nil {
 		return err
 	}
