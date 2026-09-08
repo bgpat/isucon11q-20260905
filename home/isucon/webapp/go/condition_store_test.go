@@ -132,6 +132,18 @@ func TestEncodeDecodeConditionLatest(t *testing.T) {
 	}
 }
 
+func TestConditionListFetchLimit(t *testing.T) {
+	if got := conditionListFetchLimit(conditionLimit); got != 160 {
+		t.Fatalf("limit=%d fetch=%d want 160", conditionLimit, got)
+	}
+	if got := conditionListFetchLimit(1); got != conditionListFetchMin {
+		t.Fatalf("limit=1 fetch=%d want %d", got, conditionListFetchMin)
+	}
+	if got := conditionListFetchLimit(20); got != 20*conditionListFetchFactor {
+		t.Fatalf("limit=20 fetch=%d want %d", got, 20*conditionListFetchFactor)
+	}
+}
+
 func TestDefaultValkeyAddrUsesEnv(t *testing.T) {
 	t.Setenv("VALKEY_ADDR", "example:6380")
 	if got := defaultValkeyAddr(); got != "example:6380" {
