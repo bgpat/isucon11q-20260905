@@ -27,7 +27,7 @@
 0755:0:0:etc/prometheus
 0644:0:0:etc/prometheus/hosts.json
 0644:0:0:etc/prometheus/prometheus.yml
-0644:0:0:etc/sudoers
+0440:0:0:etc/sudoers
 0755:0:0:etc/systemd/system
 0755:0:0:etc/systemd
 0644:0:0:etc/systemd/system/isucondition.go.service

@@ -30,5 +30,3 @@ root	ALL=(ALL:ALL) ALL
 #includedir /etc/sudoers.d
 Defaults	env_keep+="GIT_AUTHOR_NAME"
 Defaults	env_keep+="GIT_AUTHOR_EMAIL"
-Defaults	env_keep+="GIT_AUTHOR_NAME"
-Defaults	env_keep+="GIT_AUTHOR_EMAIL"
