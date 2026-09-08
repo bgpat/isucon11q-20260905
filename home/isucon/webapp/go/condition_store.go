@@ -352,6 +352,23 @@ func conditionListFetchLimit(limit int) int {
 	return n
 }
 
+func conditionLevelHasAll(conditionLevel map[string]interface{}) bool {
+	_, info := conditionLevel[conditionLevelInfo]
+	_, warning := conditionLevel[conditionLevelWarning]
+	_, critical := conditionLevel[conditionLevelCritical]
+	return info && warning && critical
+}
+
+func conditionListFetchCount(limit int, conditionLevel map[string]interface{}) int {
+	if conditionLevelHasAll(conditionLevel) {
+		if limit < 1 {
+			return 1
+		}
+		return limit
+	}
+	return conditionListFetchLimit(limit)
+}
+
 func getConditionsByTimeDesc(ctx context.Context, jiaIsuUUID string, endTime time.Time, startTime time.Time, limit int) ([]conditionRecord, error) {
 	max := "(" + strconv.FormatInt(endTime.Unix(), 10)
 	min := "-inf"

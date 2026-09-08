@@ -144,6 +144,28 @@ func TestConditionListFetchLimit(t *testing.T) {
 	}
 }
 
+func TestConditionListFetchCountAllLevels(t *testing.T) {
+	all := map[string]interface{}{
+		conditionLevelInfo:     struct{}{},
+		conditionLevelWarning:  struct{}{},
+		conditionLevelCritical: struct{}{},
+	}
+	if got := conditionListFetchCount(conditionLimit, all); got != conditionLimit {
+		t.Fatalf("all levels fetch=%d want %d", got, conditionLimit)
+	}
+	onlyInfo := map[string]interface{}{conditionLevelInfo: struct{}{}}
+	if got := conditionListFetchCount(conditionLimit, onlyInfo); got != 160 {
+		t.Fatalf("info only fetch=%d want 160", got)
+	}
+	infoWarning := map[string]interface{}{
+		conditionLevelInfo:    struct{}{},
+		conditionLevelWarning: struct{}{},
+	}
+	if got := conditionListFetchCount(conditionLimit, infoWarning); got != 160 {
+		t.Fatalf("info+warning fetch=%d want 160", got)
+	}
+}
+
 func TestDefaultValkeyAddrUsesEnv(t *testing.T) {
 	t.Setenv("VALKEY_ADDR", "example:6380")
 	if got := defaultValkeyAddr(); got != "example:6380" {
