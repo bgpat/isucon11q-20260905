@@ -11,7 +11,6 @@ VALKEY_PREFIX="/usr/local"
 VALKEY_CONF="/etc/valkey/valkey.conf"
 VALKEY_DATA="/var/lib/valkey"
 VALKEY_USER="valkey"
-VALKEY_SOCK="/run/valkey/valkey.sock"
 ISUCON1_HOSTNAME="ip-192-168-0-11"
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -102,13 +101,13 @@ configure_service() {
     systemctl restart valkey.service
     local i
     for i in 1 2 3 4 5 6 7 8 9 10; do
-      if "${VALKEY_PREFIX}/bin/valkey-cli" -s "${VALKEY_SOCK}" ping 2>/dev/null | grep -qx PONG; then
+      if "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -qx PONG; then
         break
       fi
       sleep 0.5
     done
     systemctl is-active --quiet valkey.service
-    "${VALKEY_PREFIX}/bin/valkey-cli" -s "${VALKEY_SOCK}" ping | grep -qx PONG
+    "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping | grep -qx PONG
     echo "Valkey を isucon1 で起動しました: $("${VALKEY_PREFIX}/bin/valkey-server" --version)"
   else
     systemctl disable --now valkey.service 2>/dev/null || true
