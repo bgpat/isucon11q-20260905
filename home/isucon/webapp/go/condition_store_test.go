@@ -204,6 +204,9 @@ func TestConditionZKeyForLevel(t *testing.T) {
 	if got := conditionZKeyForLevel(uuid, conditionLevelCritical); got != "cond:z:critical:abc" {
 		t.Fatalf("critical key=%q", got)
 	}
+	if got := conditionZKey(uuid); got != "cond:z:abc" {
+		t.Fatalf("all key=%q", got)
+	}
 }
 
 func TestConditionLevelsFromMap(t *testing.T) {
