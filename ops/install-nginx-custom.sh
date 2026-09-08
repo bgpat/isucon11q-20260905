@@ -146,12 +146,12 @@ verify_ubuntu_nginx_untouched() {
   fi
 }
 
-reload_unit_without_starting() {
+enable_custom_default() {
   systemctl daemon-reload
-  if systemctl is-enabled nginx-custom.service >/dev/null 2>&1; then
-    systemctl disable nginx-custom.service
+  if systemctl is-enabled nginx.service >/dev/null 2>&1; then
+    systemctl disable nginx.service
   fi
-  systemctl is-active --quiet nginx.service
+  systemctl enable nginx-custom.service
 }
 
 test_custom_config() {
@@ -162,16 +162,17 @@ install_build_deps
 install_binary
 install_custom_config
 verify_ubuntu_nginx_untouched
-reload_unit_without_starting
+enable_custom_default
 test_custom_config
 
 echo "カスタム nginx を入れました: $("${NGINX_SBIN}" -v 2>&1)"
 echo "現行 nginx は残しています: $("${UBUNTU_NGINX}" -v 2>&1)"
 echo "設定: ${CUSTOM_CONF}（kTLS なし）"
-echo "nginx.service は active のままです。nginx-custom は起動していません。"
-echo "切り替えるとき（このスクリプトでは実行しない）:"
+echo "再起動後は nginx-custom が起動します。このスクリプトでは 443 を切り替えません。"
+echo "今すぐ切り替えるとき:"
 echo "  systemctl stop nginx.service"
 echo "  systemctl start nginx-custom.service"
 echo "戻すとき:"
 echo "  systemctl stop nginx-custom.service"
-echo "  systemctl start nginx.service"
+echo "  systemctl disable nginx-custom.service"
+echo "  systemctl enable --now nginx.service"

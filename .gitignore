@@ -28,6 +28,9 @@
 /etc/systemd/system/*
 !/etc/systemd/system/isucondition.go.service
 !/etc/systemd/system/nginx-custom.service
+!/etc/systemd/system/multi-user.target.wants
+/etc/systemd/system/multi-user.target.wants/*
+!/etc/systemd/system/multi-user.target.wants/nginx-custom.service
 # MariaDB 11.4 更新の原本
 !/etc/mysql
 /etc/mysql/*
