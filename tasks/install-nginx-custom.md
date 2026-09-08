@@ -83,3 +83,7 @@ isucon1 ベンチ（現行 1.18.0 のまま、LOAD 09:46:30–09:47:30）: score
 ## kTLS 再ビルド（2026-09-08 21:00 頃）
 
 3 台とも `/opt/nginx-1.30.4` を `enable-ktls`、`-O3 -march=native`、`--with-file-aio` で組み直した。`ssl_conf_command Options KTLS;` は `/etc/nginx-custom/nginx.conf` のみ。共有の `/etc/nginx/nginx.conf` には書いていない。443 は付属 1.18.0 のまま。`SSL_sendfile` あり。`nginx-custom` は inactive / disabled。
+
+## kTLS なし再ビルド（2026-09-08 22:30 頃、isucon1）
+
+`enable-ktls` / `ssl_conf_command` / `modprobe tls` を外して組み直した。`-O3 -march=native` と `--with-file-aio` は残した。`/opt/nginx-1.30.4/sbin/nginx -V` に `enable-ktls` と `--with-debug` は無い。`/etc/nginx-custom/nginx.conf` は `/etc/nginx/nginx.conf` のコピーで kTLS 行なし。443 は付属 1.18.0 のまま。

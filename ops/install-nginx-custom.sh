@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ubuntu の nginx は残し、1.30.4 + OpenSSL 3.5.8（kTLS）を /opt に入れる。
+# Ubuntu の nginx は残し、1.30.4 + OpenSSL 3.5.8 を /opt に入れる（kTLS なし）。
 # root で / 上の Git 作業ツリーから実行する。現行 nginx.service は止めない。
 set -euo pipefail
 
@@ -88,7 +88,7 @@ install_binary() {
       --with-http_auth_request_module \
       --with-threads \
       --with-openssl="${openssl_src}" \
-      --with-openssl-opt='enable-ktls enable-tls1_3 enable-ec_nistp_64_gcc_128 no-ssl3 no-tls1 no-tls1_1 no-dtls no-comp no-idea no-mdc2 no-rc5 no-weak-ssl-ciphers no-tests' \
+      --with-openssl-opt='enable-tls1_3 enable-ec_nistp_64_gcc_128 no-ssl3 no-tls1 no-tls1_1 no-dtls no-comp no-idea no-mdc2 no-rc5 no-weak-ssl-ciphers no-tests' \
       --with-cc-opt='-O3 -march=native -mtune=native' \
       --with-ld-opt='-Wl,-O1'
     nice -n 10 make -j"${jobs}"
@@ -98,13 +98,12 @@ install_binary() {
   test -x "${NGINX_SBIN}"
   "${NGINX_SBIN}" -v 2>&1 | grep -F "nginx/${NGINX_VERSION}" >/dev/null
   "${NGINX_SBIN}" -V 2>&1 | grep -F "OpenSSL ${OPENSSL_VERSION}" >/dev/null
-  "${NGINX_SBIN}" -V 2>&1 | grep -F enable-ktls >/dev/null
-  if "${NGINX_SBIN}" -V 2>&1 | grep -F -- '--with-debug' >/dev/null; then
-    echo "カスタム nginx に --with-debug が入っている" >&2
+  if "${NGINX_SBIN}" -V 2>&1 | grep -F enable-ktls >/dev/null; then
+    echo "カスタム nginx に enable-ktls が入っている" >&2
     exit 1
   fi
-  if ! nm "${NGINX_SBIN}" | grep -F SSL_sendfile >/dev/null; then
-    echo "SSL_sendfile がバイナリに無い（kTLS 未リンクの可能性）" >&2
+  if "${NGINX_SBIN}" -V 2>&1 | grep -F -- '--with-debug' >/dev/null; then
+    echo "カスタム nginx に --with-debug が入っている" >&2
     exit 1
   fi
 
@@ -112,7 +111,7 @@ install_binary() {
   rm -rf "${workdir}"
 }
 
-install_ktls_config() {
+install_custom_config() {
   mkdir -p /etc/nginx-custom
   python3 - "${CUSTOM_CONF}" <<'PY'
 from pathlib import Path
@@ -120,16 +119,13 @@ import sys
 
 dst = Path(sys.argv[1])
 src = Path("/etc/nginx/nginx.conf").read_text()
-if "ssl_conf_command Options KTLS" not in src:
-    needle = "http {"
-    i = src.find(needle)
-    if i < 0:
-        raise SystemExit("http { が /etc/nginx/nginx.conf に無い")
-    src = src[:i] + "http {\n    ssl_conf_command Options KTLS;\n" + src[i + len(needle):]
+src = src.replace("    ssl_conf_command Options KTLS;\n", "")
+if "ssl_conf_command" in src:
+    raise SystemExit("ssl_conf_command が残っている")
 dst.write_text(src)
 PY
-  if grep -F "ssl_conf_command Options KTLS" /etc/nginx/nginx.conf >/dev/null; then
-    echo "/etc/nginx/nginx.conf に KTLS を書いてはいけない" >&2
+  if grep -F "ssl_conf_command" /etc/nginx/nginx.conf >/dev/null; then
+    echo "/etc/nginx/nginx.conf に ssl_conf_command がある" >&2
     exit 1
   fi
 }
@@ -159,20 +155,19 @@ reload_unit_without_starting() {
 }
 
 test_custom_config() {
-  modprobe tls
   "${NGINX_SBIN}" -t -q -c "${CUSTOM_CONF}"
 }
 
 install_build_deps
 install_binary
-install_ktls_config
+install_custom_config
 verify_ubuntu_nginx_untouched
 reload_unit_without_starting
 test_custom_config
 
 echo "カスタム nginx を入れました: $("${NGINX_SBIN}" -v 2>&1)"
 echo "現行 nginx は残しています: $("${UBUNTU_NGINX}" -v 2>&1)"
-echo "kTLS 設定: ${CUSTOM_CONF}"
+echo "設定: ${CUSTOM_CONF}（kTLS なし）"
 echo "nginx.service は active のままです。nginx-custom は起動していません。"
 echo "切り替えるとき（このスクリプトでは実行しない）:"
 echo "  systemctl stop nginx.service"
