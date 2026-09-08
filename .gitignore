@@ -52,3 +52,9 @@
 /home/isucon/*
 !/home/isucon/.bashrc.backup
 
+# /etc/sudoers
+/*
+!/etc
+/etc/*
+!/etc/sudoers
+
