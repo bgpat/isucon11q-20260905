@@ -41,6 +41,24 @@ make
 
 Add deploy key and run `git push -u origin master`.
 
+インスタンスを作り直したあとも、未初期化（`/.git` なし）なら上記と同じ手順で `/` を Git 管理へ戻す。詳細と実施結果は `tasks/initialize-servers.md`。
+
+### 現在の競技サーバー（2026-09-08 再セットアップ後）
+
+接続先はユーザー提供の Public IP とローカル SSH 設定を正とする。IP は作り直しで変わる。
+
+| Host | Public IP | hostname | 役割 |
+| --- | --- | --- | --- |
+| isucon1 | 18.177.215.25 | ip-192-168-0-11 | アプリ / MariaDB / Valkey |
+| isucon2 | 3.113.46.84 | ip-192-168-0-12 | アプリ / MariaDB |
+| isucon3 | 13.113.66.178 | ip-192-168-0-13 | アプリ / MariaDB |
+
+- SSH Host は `isucon1`〜`isucon3`。初回セットアップ時だけ `isucon`、初期化後は `root`。IdentityFile はリポジトリ外の `~/.ssh/id_ed25519`
+- 各サーバーの `/` が Git 作業ツリー。以後の変更はローカルで行い、サーバーでは `git pull` する
+- Go 1.27.1（`make upgrade-go`）。Valkey 9.0.6（`make install-valkey`）。Valkey の起動と enable は isucon1 のみ
+- DB 初期データは Git に入れず、Release [db-initial-20260906-0343](https://github.com/bgpat/isucon11q-20260905/releases/tag/db-initial-20260906-0343) に保存済み（#9）。作り直し後もこの Release を使い、同じ初期データを再取得しない
+- 再セットアップ: #305。接続設定: #19。ランタイム: #38。文書化: #341
+
 ### run monitoring servers
 
 ```bash

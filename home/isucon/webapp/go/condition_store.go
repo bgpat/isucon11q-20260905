@@ -18,6 +18,8 @@ const (
 	conditionLatestKeyPrefix = "cond:latest:"
 	conditionKeyScanMatch    = "cond:*"
 	isucon1Hostname          = "ip-192-168-0-11"
+	conditionListFetchFactor = 8
+	conditionListFetchMin    = 64
 	conditionMemberVer1      = 1
 	conditionMemberHdrLen    = 18
 	flagSitting              = 1 << 0
@@ -342,12 +344,29 @@ func getLatestConditionsFromValkey(ctx context.Context, uuids []string) (map[str
 	return out, nil
 }
 
-func conditionDescFetchCount(limit int) int {
-	n := limit * 4
-	if n < 64 {
-		return 64
+func conditionListFetchLimit(limit int) int {
+	n := limit * conditionListFetchFactor
+	if n < conditionListFetchMin {
+		return conditionListFetchMin
 	}
 	return n
+}
+
+func conditionLevelHasAll(conditionLevel map[string]interface{}) bool {
+	_, info := conditionLevel[conditionLevelInfo]
+	_, warning := conditionLevel[conditionLevelWarning]
+	_, critical := conditionLevel[conditionLevelCritical]
+	return info && warning && critical
+}
+
+func conditionListFetchCount(limit int, conditionLevel map[string]interface{}) int {
+	if conditionLevelHasAll(conditionLevel) {
+		if limit < 1 {
+			return 1
+		}
+		return limit
+	}
+	return conditionListFetchLimit(limit)
 }
 
 func getConditionsByTimeDesc(ctx context.Context, jiaIsuUUID string, endTime time.Time, startTime time.Time, offset, limit int) ([]conditionRecord, error) {
@@ -359,10 +378,11 @@ func getConditionsByTimeDesc(ctx context.Context, jiaIsuUUID string, endTime tim
 	if offset < 0 {
 		offset = 0
 	}
-	// 余裕を持って多めに取り、呼び出し側で level フィルタする。
-	fetch := int64(conditionDescFetchCount(limit))
+	if limit < 1 {
+		limit = 1
+	}
 	members, err := valkeyClient.Do(ctx,
-		valkeyClient.B().Zrevrangebyscore().Key(conditionZKey(jiaIsuUUID)).Max(max).Min(min).Limit(int64(offset), fetch).Build(),
+		valkeyClient.B().Zrevrangebyscore().Key(conditionZKey(jiaIsuUUID)).Max(max).Min(min).Limit(int64(offset), int64(limit)).Build(),
 	).AsStrSlice()
 	if err != nil {
 		return nil, err

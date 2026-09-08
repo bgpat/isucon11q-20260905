@@ -1397,11 +1397,8 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 func getIsuConditionsFromValkey(ctx context.Context, jiaIsuUUID string, endTime time.Time, conditionLevel map[string]interface{}, startTime time.Time,
 	limit int, isuName string) ([]*GetIsuConditionResponse, error) {
 	conditionsResponse := make([]*GetIsuConditionResponse, 0, limit)
-	fetchLimit := limit * 8
-	if fetchLimit < 64 {
-		fetchLimit = 64
-	}
-	fetchCount := conditionDescFetchCount(fetchLimit)
+	// 全レベル指定ならフィルタで落ちないので limit 件。一部指定だけ *8 する。
+	fetchLimit := conditionListFetchCount(limit, conditionLevel)
 	offset := 0
 	for {
 		records, err := getConditionsByTimeDesc(ctx, jiaIsuUUID, endTime, startTime, offset, fetchLimit)
@@ -1432,7 +1429,7 @@ func getIsuConditionsFromValkey(ctx context.Context, jiaIsuUUID string, endTime 
 				return conditionsResponse, nil
 			}
 		}
-		if len(records) < fetchCount {
+		if len(records) < fetchLimit {
 			return conditionsResponse, nil
 		}
 		// 同じ秒の残りを落とさないよう、end_time は固定して offset だけ進める。

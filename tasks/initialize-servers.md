@@ -215,8 +215,24 @@ done
 
 # 作業後の記録
 
-- 実行日時:
-- 対象サーバー:
-- 初期 commit:
-- deploy key 登録の有無:
-- 関連 Issue / Pull Request:
+## 2026-09-06 初回（#15）
+
+- 実行日時: 2026-09-06
+- 対象サーバー: isucon1〜3（hostname `ip-192-168-0-11` / `ip-192-168-0-12` / `ip-192-168-0-13`）
+- `/` を Git 管理へ登録し origin/master と同期。`home/isucon/webapp/go` を明示的に追跡
+- deploy key 登録済み。3台とも Git status clean を確認
+- 関連: #15 #19
+
+## 2026-09-08 インスタンス作り直し後（#305）
+
+- 実行日時: 2026-09-08 08:25–08:37 JST
+- 対象:
+  - isucon1 `18.177.215.25`（ip-192-168-0-11）
+  - isucon2 `3.113.46.84`（ip-192-168-0-12）
+  - isucon3 `13.113.66.178`（ip-192-168-0-13）
+- 3台とも `/.git` なしを確認し、`git reset --hard` で origin/master を載せた
+- deploy key を再発行し、write 付きで再登録した
+- 現行 master のビルド用に Go 1.27.1 を再導入。Valkey 9.0.6 を3台へ入れ、起動と enable は isucon1 のみ
+- 同期後の commit: `70d7250`。3台とも working tree clean、root で SSH 可能
+- sudoers / sshd_config は初回と同様 Git 未追跡のまま
+- 関連: #305 #341。初期データは再取得せず Release `db-initial-20260906-0343`（#9）を使う
