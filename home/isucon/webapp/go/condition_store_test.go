@@ -192,3 +192,94 @@ func TestConditionMembersAreUnique(t *testing.T) {
 		t.Fatalf("members should differ: %q", a)
 	}
 }
+
+func TestConditionLevelAllowMask(t *testing.T) {
+	all := map[string]interface{}{
+		conditionLevelInfo:     struct{}{},
+		conditionLevelWarning:  struct{}{},
+		conditionLevelCritical: struct{}{},
+	}
+	if got := conditionLevelAllowMask(all); got != 0xf {
+		t.Fatalf("all mask=%d want 15", got)
+	}
+	if got := conditionLevelAllowMask(map[string]interface{}{conditionLevelInfo: struct{}{}}); got != 1 {
+		t.Fatalf("info mask=%d want 1", got)
+	}
+	if got := conditionLevelAllowMask(map[string]interface{}{conditionLevelWarning: struct{}{}}); got != 6 {
+		t.Fatalf("warning mask=%d want 6", got)
+	}
+	if got := conditionLevelAllowMask(map[string]interface{}{conditionLevelCritical: struct{}{}}); got != 8 {
+		t.Fatalf("critical mask=%d want 8", got)
+	}
+	infoWarning := map[string]interface{}{
+		conditionLevelInfo:    struct{}{},
+		conditionLevelWarning: struct{}{},
+	}
+	if got := conditionLevelAllowMask(infoWarning); got != 7 {
+		t.Fatalf("info+warning mask=%d want 7", got)
+	}
+}
+
+func TestConditionWarnCountFromFlags(t *testing.T) {
+	if got := conditionWarnCountFromFlags(0); got != 0 {
+		t.Fatalf("empty=%d", got)
+	}
+	if got := conditionWarnCountFromFlags(flagSitting); got != 0 {
+		t.Fatalf("sitting=%d", got)
+	}
+	if got := conditionWarnCountFromFlags(flagDirty | flagSitting); got != 1 {
+		t.Fatalf("dirty+sitting=%d", got)
+	}
+	if got := conditionWarnCountFromFlags(flagDirty | flagOverweight); got != 2 {
+		t.Fatalf("two=%d", got)
+	}
+	if got := conditionWarnCountFromFlags(flagDirty | flagOverweight | flagBroken); got != 3 {
+		t.Fatalf("three=%d", got)
+	}
+}
+
+func TestMemberMatchesAllowMask(t *testing.T) {
+	infoRec := conditionRecord{
+		Timestamp: time.Unix(1, 0),
+		Condition: packedConditionCSV[0],
+		Message:   "m",
+	}
+	warnRec := conditionRecord{
+		Timestamp: time.Unix(1, 0),
+		Condition: packedConditionCSV[3],
+		Message:   "m",
+	}
+	critRec := conditionRecord{
+		Timestamp: time.Unix(1, 0),
+		IsSitting: true,
+		Condition: packedConditionCSV[7],
+		Message:   "m",
+	}
+	infoM, err := encodeConditionMember(infoRec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warnM, err := encodeConditionMember(warnRec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	critM, err := encodeConditionMember(critRec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	infoMask := conditionLevelAllowMask(map[string]interface{}{conditionLevelInfo: struct{}{}})
+	warnMask := conditionLevelAllowMask(map[string]interface{}{conditionLevelWarning: struct{}{}})
+	critMask := conditionLevelAllowMask(map[string]interface{}{conditionLevelCritical: struct{}{}})
+	if !memberMatchesAllowMask(infoM, infoMask) || memberMatchesAllowMask(warnM, infoMask) || memberMatchesAllowMask(critM, infoMask) {
+		t.Fatal("info mask")
+	}
+	if memberMatchesAllowMask(infoM, warnMask) || !memberMatchesAllowMask(warnM, warnMask) || memberMatchesAllowMask(critM, warnMask) {
+		t.Fatal("warning mask")
+	}
+	if memberMatchesAllowMask(infoM, critMask) || memberMatchesAllowMask(warnM, critMask) || !memberMatchesAllowMask(critM, critMask) {
+		t.Fatal("critical mask")
+	}
+	if memberMatchesAllowMask("short", infoMask) {
+		t.Fatal("short member")
+	}
+}

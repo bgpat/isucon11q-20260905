@@ -41,6 +41,79 @@ if not oldts or newts >= oldts then
 end
 return 0
 `
+	// KEYS[1]=ZSET, ARGV[1]=max, ARGV[2]=min, ARGV[3]=want, ARGV[4]=allow mask
+	// mask bit0=warn0(info), bit1=warn1, bit2=warn2, bit3=warn3(critical)
+	valkeyConditionMatchLua = `
+local key = KEYS[1]
+local max = ARGV[1]
+local min = ARGV[2]
+local want = tonumber(ARGV[3])
+local mask = tonumber(ARGV[4])
+local batch = 64
+local out = {}
+local ver = 1
+
+local function warn_count(flags)
+  local n = 0
+  if math.floor(flags / 2) % 2 == 1 then n = n + 1 end
+  if math.floor(flags / 4) % 2 == 1 then n = n + 1 end
+  if math.floor(flags / 8) % 2 == 1 then n = n + 1 end
+  return n
+end
+
+local function matches(m)
+  if #m < 18 then
+    return false
+  end
+  if string.byte(m, 1) ~= ver then
+    return false
+  end
+  local w = warn_count(string.byte(m, 2))
+  local bitv = 2^w
+  return math.floor(mask / bitv) % 2 == 1
+end
+
+local function consider(m)
+  if matches(m) then
+    out[#out + 1] = m
+    return #out >= want
+  end
+  return false
+end
+
+while #out < want do
+  local members = redis.call('ZREVRANGEBYSCORE', key, max, min, 'LIMIT', 0, batch)
+  if #members == 0 then
+    break
+  end
+  for i = 1, #members do
+    if consider(members[i]) then
+      return out
+    end
+  end
+  if #members < batch then
+    break
+  end
+  local last = members[#members]
+  local last_score = redis.call('ZSCORE', key, last)
+  if not last_score then
+    break
+  end
+  local same = redis.call('ZREVRANGEBYSCORE', key, last_score, last_score)
+  local seen = false
+  for i = 1, #same do
+    if seen then
+      if consider(same[i]) then
+        return out
+      end
+    elseif same[i] == last then
+      seen = true
+    end
+  end
+  max = '(' .. last_score
+end
+return out
+`
 )
 
 var (
@@ -369,17 +442,81 @@ func conditionListFetchCount(limit int, conditionLevel map[string]interface{}) i
 	return conditionListFetchLimit(limit)
 }
 
-func getConditionsByTimeDesc(ctx context.Context, jiaIsuUUID string, endTime time.Time, startTime time.Time, limit int) ([]conditionRecord, error) {
-	max := "(" + strconv.FormatInt(endTime.Unix(), 10)
-	min := "-inf"
+func conditionLevelAllowMask(conditionLevel map[string]interface{}) int {
+	mask := 0
+	if _, ok := conditionLevel[conditionLevelInfo]; ok {
+		mask |= 1 << 0
+	}
+	if _, ok := conditionLevel[conditionLevelWarning]; ok {
+		mask |= 1 << 1
+		mask |= 1 << 2
+	}
+	if _, ok := conditionLevel[conditionLevelCritical]; ok {
+		mask |= 1 << 3
+	}
+	return mask
+}
+
+func conditionWarnCountFromFlags(flags byte) int {
+	n := 0
+	if flags&flagDirty != 0 {
+		n++
+	}
+	if flags&flagOverweight != 0 {
+		n++
+	}
+	if flags&flagBroken != 0 {
+		n++
+	}
+	return n
+}
+
+func memberMatchesAllowMask(member string, mask int) bool {
+	if len(member) < conditionMemberHdrLen || member[0] != conditionMemberVer1 {
+		return false
+	}
+	w := conditionWarnCountFromFlags(member[1])
+	return mask&(1<<uint(w)) != 0
+}
+
+func conditionScoreRange(endTime time.Time, startTime time.Time) (max string, min string) {
+	max = "(" + strconv.FormatInt(endTime.Unix(), 10)
+	min = "-inf"
 	if !startTime.IsZero() {
 		min = strconv.FormatInt(startTime.Unix(), 10)
 	}
+	return max, min
+}
+
+func getConditionsByTimeDesc(ctx context.Context, jiaIsuUUID string, endTime time.Time, startTime time.Time, limit int) ([]conditionRecord, error) {
+	max, min := conditionScoreRange(endTime, startTime)
 	if limit < 1 {
 		limit = 1
 	}
 	members, err := valkeyClient.Do(ctx,
 		valkeyClient.B().Zrevrangebyscore().Key(conditionZKey(jiaIsuUUID)).Max(max).Min(min).Limit(0, int64(limit)).Build(),
+	).AsStrSlice()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]conditionRecord, 0, len(members))
+	for _, member := range members {
+		rec, err := decodeConditionMember(member)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
+func getConditionsByTimeDescMatching(ctx context.Context, jiaIsuUUID string, endTime time.Time, startTime time.Time, limit int, mask int) ([]conditionRecord, error) {
+	max, min := conditionScoreRange(endTime, startTime)
+	if limit < 1 {
+		limit = 1
+	}
+	members, err := valkeyClient.Do(ctx,
+		valkeyClient.B().Eval().Script(valkeyConditionMatchLua).Numkeys(1).Key(conditionZKey(jiaIsuUUID)).Arg(max).Arg(min).Arg(strconv.Itoa(limit)).Arg(strconv.Itoa(mask)).Build(),
 	).AsStrSlice()
 	if err != nil {
 		return nil, err
