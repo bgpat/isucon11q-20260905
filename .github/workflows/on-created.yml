@@ -3,8 +3,8 @@ name: On Created
 # リポジトリ作成時に共通タスクとラベルを自動作成する。
 on:
   push:
-    branches:
-      - master
+    branches: []
+#      - master
 
 concurrency:
   group: on-created-${{ github.ref }}
