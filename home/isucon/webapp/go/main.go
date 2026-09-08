@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -466,8 +467,27 @@ func init() {
 	}
 }
 
+func listenUnixSocket(path string) (net.Listener, error) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if unixListener, ok := listener.(*net.UnixListener); ok {
+		unixListener.SetUnlinkOnClose(true)
+	}
+	if err := os.Chmod(path, 0660); err != nil {
+		listener.Close()
+		return nil, err
+	}
+	return listener, nil
+}
+
 func main() {
 	e := echo.New()
+	e.Binder = jsonV2Binder{}
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
 	dropConditionLogger = e.Logger
@@ -521,6 +541,17 @@ func main() {
 	postIsuConditionTargetBaseURL = os.Getenv("POST_ISUCONDITION_TARGET_BASE_URL")
 	if postIsuConditionTargetBaseURL == "" {
 		e.Logger.Fatalf("missing: POST_ISUCONDITION_TARGET_BASE_URL")
+		return
+	}
+
+	if socketPath := os.Getenv("SERVER_UNIX_SOCKET"); socketPath != "" {
+		listener, err := listenUnixSocket(socketPath)
+		if err != nil {
+			e.Logger.Fatalf("failed to listen unix socket: %v", err)
+			return
+		}
+		e.Listener = listener
+		e.Logger.Fatal(e.Start(""))
 		return
 	}
 
@@ -1416,13 +1447,15 @@ func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, c
 func getIsuConditionsFromValkey(ctx context.Context, jiaIsuUUID string, endTime time.Time, conditionLevel map[string]interface{}, startTime time.Time,
 	limit int, isuName string) ([]*GetIsuConditionResponse, error) {
 	conditionsResponse := make([]*GetIsuConditionResponse, 0, limit)
-	fetchLimit := limit * 8
-	if fetchLimit < 64 {
-		fetchLimit = 64
+	// level 別 ZSET から取るので、指定 level の LIMIT は応答件数と同じ。
+	fetchLimit := limit
+	if fetchLimit < 1 {
+		fetchLimit = 1
 	}
+	levels := conditionLevelsFromMap(conditionLevel)
 	cursorEnd := endTime
 	for {
-		records, err := getConditionsByTimeDesc(ctx, jiaIsuUUID, cursorEnd, startTime, fetchLimit)
+		records, err := getConditionsByTimeDesc(ctx, jiaIsuUUID, cursorEnd, startTime, fetchLimit, levels)
 		if err != nil {
 			return nil, err
 		}
@@ -1700,7 +1733,7 @@ func postIsuCondition(c echo.Context) error {
 	if jiaIsuUUID == "" {
 		return c.String(http.StatusBadRequest, "missing: jia_isu_uuid")
 	}
-	req := []PostIsuConditionRequest{}
+	req := make([]PostIsuConditionRequest, 0, postIsuConditionBindCap)
 	if err := c.Bind(&req); err != nil {
 		return c.String(http.StatusBadRequest, "bad request body")
 	} else if len(req) == 0 {
