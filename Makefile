@@ -164,6 +164,11 @@ install-valkey:
 	test "$$(id -u)" -eq 0
 	/ops/install-valkey.sh
 
+.PHONY: install-nginx-custom
+install-nginx-custom:
+	test "$$(id -u)" -eq 0
+	/ops/install-nginx-custom.sh
+
 # Override LOG_FILES with paths confirmed on the target server. Do not add
 # unconfirmed server-specific paths here.
 LOG_ARCHIVE_ROOT ?= /var/log/archive

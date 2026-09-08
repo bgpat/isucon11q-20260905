@@ -27,6 +27,7 @@
 !/etc/systemd/system
 /etc/systemd/system/*
 !/etc/systemd/system/isucondition.go.service
+!/etc/systemd/system/nginx-custom.service
 # MariaDB 11.4 更新の原本
 !/etc/mysql
 /etc/mysql/*
@@ -39,6 +40,7 @@
 !/ops/benchmark-report.py
 !/ops/benchmark_sql.py
 !/ops/test_benchmark_report.py
+!/ops/install-nginx-custom.sh
 # /home/isucon/.bashrc.backup
 /*
 !/home
