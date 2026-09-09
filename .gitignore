@@ -66,3 +66,20 @@
 /etc/mysql/*
 !/etc/mysql/my.cnf
 
+# Tempo 設定と GET /api/trend のトレース（#366）
+/*
+!/files
+/files/*
+!/files/tempo
+/files/tempo/*
+!/files/tempo/config.yml
+!/home
+/home/*
+!/home/isucon
+/home/isucon/*
+!/home/isucon/webapp
+/home/isucon/webapp/*
+!/home/isucon/webapp/go
+/home/isucon/webapp/go/*
+!/home/isucon/webapp/go/tracing.go
+

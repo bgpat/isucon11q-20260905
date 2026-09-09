@@ -67,6 +67,8 @@ make monitoring
 
 Access to 3999 port from your browser.
 
+Grafana OSS 13.2.1 と Tempo 2.6.1 も同じ `make monitoring` で nohup 起動する。systemd には入れないので、サーバー再起動後は自動では立ち上がらない。トレースは Grafana の Explore で Tempo を選ぶ。アプリは `ENABLE_TRACING=1`（`/etc/isucondition-observability.env`）のとき OTLP を `127.0.0.1:4318` へ送る。提出用計測では `ENABLE_TRACING=0` にしてアプリを再起動する（#12）。
+
 ### edit config file
 
 ```bash

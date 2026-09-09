@@ -124,8 +124,11 @@ endif
 	-git add -f $@
 	-git commit -m 'Add host'
 
+GRAFANA_VERSION := 13.2.1
+TEMPO_VERSION := 2.6.1
+
 .PHONY: monitoring
-monitoring: prometheus node_exporter process-exporter grafana-server
+monitoring: prometheus node_exporter process-exporter grafana-server tempo
 
 .PHONY: deploy
 deploy:
@@ -222,14 +225,36 @@ process-exporter: /usr/local/bin/process-exporter /etc/process-exporter/all.yaml
 
 .PHONY: grafana-server
 grafana-server: /usr/local/bin/grafana-server
-	-pkill $@
-	GF_SERVER_HTTP_PORT=3999 GF_AUTH_ANONYMOUS_ENABLED=true GF_AUTH_ANONYMOUS_ORG_ROLE=Admin nohup $@ -homepath /opt/grafana &
+	cp -f /files/grafana/datasources.yml /opt/grafana/conf/provisioning/datasources/datasources.yml
+	cp -f /files/grafana/dashboards.yml /opt/grafana/conf/provisioning/dashboards/dashboards.yml
+	-pkill grafana-server
+	-pkill -x grafana
+	GF_SERVER_HTTP_PORT=3999 GF_AUTH_ANONYMOUS_ENABLED=true GF_AUTH_ANONYMOUS_ORG_ROLE=Admin nohup grafana-server -homepath /opt/grafana &
 
-/usr/local/bin/grafana-server: /opt/grafana
-	ln -sf $</bin/grafana-server $@
+# Grafana 13 以降は bin/grafana-server がなく、bin/grafana server になる。
+/usr/local/bin/grafana-server: /opt/grafana-$(GRAFANA_VERSION)
+	if [ -d /opt/grafana ] && [ ! -L /opt/grafana ]; then rm -rf /opt/grafana; fi
+	ln -sfn /opt/grafana-$(GRAFANA_VERSION) /opt/grafana
+	printf '%s\n' '#!/bin/sh' 'exec /opt/grafana/bin/grafana server "$$@"' > $@
+	chmod +x $@
 
-/opt/grafana:
+/opt/grafana-$(GRAFANA_VERSION):
 	mkdir -p $@
-	curl -sL https://dl.grafana.com/oss/release/grafana-7.1.5.linux-amd64.tar.gz | tar xzv --strip-components 1 -C $@
+	curl -sL https://dl.grafana.com/oss/release/grafana-$(GRAFANA_VERSION).linux-amd64.tar.gz | tar xzv --strip-components 1 -C $@
+	mkdir -p $@/conf/provisioning/datasources $@/conf/provisioning/dashboards
 	cp -f /files/grafana/datasources.yml $@/conf/provisioning/datasources/datasources.yml
 	cp -f /files/grafana/dashboards.yml $@/conf/provisioning/dashboards/dashboards.yml
+
+# Tempo は nohup のみ。systemd enable しないので再起動後は起動しない。
+.PHONY: tempo
+tempo: /usr/local/bin/tempo /etc/tempo/config.yml
+	-pkill tempo
+	mkdir -p /tmp/tempo/wal /tmp/tempo/blocks
+	nohup tempo -config.file=/etc/tempo/config.yml >/tmp/tempo/tempo.log 2>&1 &
+
+/usr/local/bin/tempo:
+	curl -sL https://github.com/grafana/tempo/releases/download/v$(TEMPO_VERSION)/tempo_$(TEMPO_VERSION)_linux_amd64.tar.gz | tar xzv -C /usr/local/bin tempo
+
+/etc/tempo/config.yml: files/tempo/config.yml
+	mkdir -p /etc/tempo
+	cp -f $< $@
