@@ -71,6 +71,8 @@ var (
 	trendCache                    struct {
 		sync.RWMutex
 		response []TrendResponse
+		body     []byte
+		locs     map[int]trendJSONLoc
 		valid    bool
 		gen      uint64
 	}
@@ -988,7 +990,6 @@ func postIsu(c echo.Context) error {
 	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
 		c.Logger().Errorf("failed to cache icon: %v", err)
 	}
-	invalidateTrendCache()
 
 	return writeJSON(c, http.StatusCreated, isu)
 }
@@ -1515,16 +1516,19 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
-	if res, ok := loadTrendCacheIfUsable(); ok {
-		return writeJSON(c, http.StatusOK, res)
+	if body, ok := loadTrendJSONIfUsable(); ok {
+		return writeJSONBytes(c, http.StatusOK, body)
 	}
 
 	// 再計算は trendComputeMu だけ直列化する。trendCache は持たないので
 	// POST /api/condition の markTrendCacheDirty は待たない。
 	trendComputeMu.Lock()
 	defer trendComputeMu.Unlock()
-	if res, ok := loadTrendCacheIfUsable(); ok {
-		return writeJSON(c, http.StatusOK, res)
+	if body, ok := loadTrendJSONIfUsable(); ok {
+		return writeJSONBytes(c, http.StatusOK, body)
+	}
+	if body, ok := refreshTrendJSONFromMemory(); ok {
+		return writeJSONBytes(c, http.StatusOK, body)
 	}
 	gen, _, _ := snapshotTrendCache()
 
@@ -1622,6 +1626,9 @@ func getTrend(c echo.Context) error {
 		})
 	}
 	storeTrendCache(gen, res)
+	if body, ok := loadTrendJSONIfUsable(); ok {
+		return writeJSONBytes(c, http.StatusOK, body)
+	}
 	return writeJSON(c, http.StatusOK, res)
 }
 
@@ -1710,7 +1717,13 @@ func postIsuCondition(c echo.Context) error {
 		c.Logger().Errorf("valkey error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	markTrendCacheDirty()
+	latest := records[0]
+	for _, rec := range records[1:] {
+		if !rec.Timestamp.Before(latest.Timestamp) {
+			latest = rec
+		}
+	}
+	applyTrendLatest(jiaIsuUUID, latest)
 	invalidateGraphCacheForConditions(jiaIsuUUID, timestamps)
 	return c.NoContent(http.StatusAccepted)
 }
