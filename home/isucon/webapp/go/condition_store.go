@@ -183,9 +183,9 @@ func decodeConditionLatest(raw string) (conditionRecord, error) {
 	}, nil
 }
 
-func insertIsuConditionsToValkey(ctx context.Context, jiaIsuUUID string, records []conditionRecord) error {
+func insertIsuConditionsToValkey(ctx context.Context, jiaIsuUUID string, records []conditionRecord) (bool, error) {
 	if len(records) == 0 {
-		return nil
+		return false, nil
 	}
 	cmds := make(valkey.Commands, 0, len(records)+1)
 	var latest *conditionRecord
@@ -193,11 +193,11 @@ func insertIsuConditionsToValkey(ctx context.Context, jiaIsuUUID string, records
 		rec := records[i]
 		member, err := encodeConditionMember(rec)
 		if err != nil {
-			return err
+			return false, err
 		}
 		level, err := calculateConditionLevel(rec.Condition)
 		if err != nil {
-			return err
+			return false, err
 		}
 		cmds = append(cmds, valkeyClient.B().Zadd().Key(conditionZKeyForLevel(jiaIsuUUID, level)).ScoreMember().ScoreMember(float64(rec.Timestamp.Unix()), member).Build())
 		if latest == nil || !rec.Timestamp.Before(latest.Timestamp) {
@@ -206,12 +206,17 @@ func insertIsuConditionsToValkey(ctx context.Context, jiaIsuUUID string, records
 		}
 	}
 	cmds = append(cmds, valkeyClient.B().Eval().Script(valkeyLatestUpdateLua).Numkeys(1).Key(conditionLatestKey(jiaIsuUUID)).Arg(strconv.FormatInt(latest.Timestamp.Unix(), 10)).Arg(encodeConditionLatest(*latest)).Build())
-	for _, resp := range valkeyClient.DoMulti(ctx, cmds...) {
-		if err := resp.Error(); err != nil {
-			return err
+	resps := valkeyClient.DoMulti(ctx, cmds...)
+	for i := 0; i < len(resps)-1; i++ {
+		if err := resps[i].Error(); err != nil {
+			return false, err
 		}
 	}
-	return nil
+	updated, err := resps[len(resps)-1].AsInt64()
+	if err != nil {
+		return false, err
+	}
+	return updated == 1, nil
 }
 
 func clearConditionKeys(ctx context.Context) error {
@@ -263,7 +268,7 @@ func loadIsuConditionsFromDBToValkey(ctx context.Context, q sqlx.Queryer) error 
 		if len(recs) == 0 {
 			return nil
 		}
-		if err := insertIsuConditionsToValkey(ctx, uuid, recs); err != nil {
+		if _, err := insertIsuConditionsToValkey(ctx, uuid, recs); err != nil {
 			return err
 		}
 		delete(batchByUUID, uuid)
