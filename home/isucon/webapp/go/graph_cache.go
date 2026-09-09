@@ -48,6 +48,7 @@ func invalidateGraphCache() {
 	graphCache.Lock()
 	graphCache.entries = nil
 	graphCache.Unlock()
+	graphTraceInvalidateAll()
 }
 
 func invalidateGraphCacheForConditions(jiaIsuUUID string, timestamps []time.Time) {
@@ -55,13 +56,15 @@ func invalidateGraphCacheForConditions(jiaIsuUUID string, timestamps []time.Time
 		return
 	}
 	graphCache.Lock()
-	defer graphCache.Unlock()
 	byStart, ok := graphCache.entries[jiaIsuUUID]
 	if !ok || len(byStart) == 0 {
+		graphCache.Unlock()
 		return
 	}
 	// startUnix は getIsuGraph で hour truncate 済み。timestamp ts が
 	// [start, start+24h) に入る start は hour 境界で (ts-24h, ts] の最大 24 個。
+	_, hadWatchDay := byStart[graphTraceWatchDay]
+	deletedWatchDay := false
 	seenHour := make(map[int64]struct{}, 8)
 	for _, ts := range timestamps {
 		hour := ts.Truncate(time.Hour).Unix()
@@ -71,10 +74,16 @@ func invalidateGraphCacheForConditions(jiaIsuUUID string, timestamps []time.Time
 		seenHour[hour] = struct{}{}
 		end := time.Unix(hour, 0)
 		for i := 0; i < 24; i++ {
-			delete(byStart, end.Add(-time.Duration(i)*time.Hour).Unix())
+			startUnix := end.Add(-time.Duration(i) * time.Hour).Unix()
+			delete(byStart, startUnix)
+			if hadWatchDay && startUnix == graphTraceWatchDay {
+				deletedWatchDay = true
+			}
 		}
 	}
 	if len(byStart) == 0 {
 		delete(graphCache.entries, jiaIsuUUID)
 	}
+	graphCache.Unlock()
+	graphTraceInvalidate(jiaIsuUUID, timestamps, deletedWatchDay)
 }

@@ -474,6 +474,7 @@ func main() {
 	e.Logger.SetLevel(log.DEBUG)
 	dropConditionLogger = e.Logger
 	startDropConditionLogFlusher()
+	initGraphTrace()
 
 	accessLogWriter = newDeferredLogWriter(os.Stdout)
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
@@ -1069,9 +1070,12 @@ func getIsuGraph(c echo.Context) error {
 	}
 	date := time.Unix(datetimeInt64, 0).Truncate(time.Hour)
 	cacheKey := graphCacheKey{jiaUserID: jiaUserID, jiaIsuUUID: jiaIsuUUID, startUnix: date.Unix()}
+	seenGen := graphTraceCurrentGen()
 	if body, ok := graphCacheGet(cacheKey); ok {
+		graphTraceHit(cacheKey, body)
 		return writeJSONBytes(c, http.StatusOK, body)
 	}
+	graphTraceMiss(cacheKey, seenGen)
 
 	_, ok, err := ownedIsuMeta(jiaIsuUUID, jiaUserID)
 	if err != nil {
@@ -1092,7 +1096,9 @@ func getIsuGraph(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	graphTraceGenerated(cacheKey, res, seenGen)
 	graphCacheSet(cacheKey, body)
+	graphTraceSet(cacheKey, body, seenGen)
 	return writeJSONBytes(c, http.StatusOK, body)
 }
 
@@ -1108,6 +1114,7 @@ func generateIsuGraphResponse(ctx context.Context, jiaIsuUUID string, graphDate 
 	if err != nil {
 		return nil, fmt.Errorf("valkey error: %v", err)
 	}
+	graphTraceValkeyRange(jiaIsuUUID, graphDate.Unix(), records)
 
 	for _, rec := range records {
 		condition := IsuCondition{
@@ -1309,6 +1316,7 @@ func getIsuConditions(c echo.Context) error {
 		c.Logger().Errorf("valkey error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	graphTraceCond(jiaIsuUUID, conditionsResponse)
 	return writeJSON(c, http.StatusOK, conditionsResponse)
 }
 
@@ -1672,6 +1680,7 @@ func postIsuCondition(c echo.Context) error {
 	}
 	invalidateTrendCache()
 	invalidateGraphCacheForConditions(jiaIsuUUID, timestamps)
+	graphTracePost(jiaIsuUUID, timestamps)
 	return c.NoContent(http.StatusAccepted)
 }
 
