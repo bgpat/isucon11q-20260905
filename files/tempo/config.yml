@@ -30,7 +30,10 @@ ingester:
 
 memberlist:
   abort_if_cluster_join_fails: false
+  bind_addr:
+    - 0.0.0.0
   bind_port: 7946
+  advertise_addr: __TEMPO_INSTANCE_ADDR__
   join_members:
 __TEMPO_JOIN_MEMBERS__
 
