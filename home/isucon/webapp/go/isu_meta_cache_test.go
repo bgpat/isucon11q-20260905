@@ -51,6 +51,35 @@ func TestIsuMetaCacheStoreListAndInvalidate(t *testing.T) {
 	}
 }
 
+func TestForgetIsuMetaRemovesUUIDKeepUserLoaded(t *testing.T) {
+	invalidateIsuMetaCache()
+	invalidateIsuUUIDCache()
+	t.Cleanup(func() {
+		invalidateIsuMetaCache()
+		invalidateIsuUUIDCache()
+	})
+
+	keep := isuMeta{ID: 2, JIAIsuUUID: "keep", Name: "k", Character: "cat", JIAUserID: "user-a"}
+	drop := isuMeta{ID: 1, JIAIsuUUID: "drop", Name: "d", Character: "dog", JIAUserID: "user-a"}
+	isuMetas.storeUser("user-a", []isuMeta{keep, drop})
+	forgetIsuUUID("drop")
+	forgetIsuMeta("drop")
+
+	if _, ok := isuMetas.get("drop"); ok {
+		t.Fatal("forgotten uuid should miss")
+	}
+	if _, ok := isuUUIDCache.Load("drop"); ok {
+		t.Fatal("forgotten uuid cache should miss")
+	}
+	got, ok := isuMetas.list("user-a")
+	if !ok {
+		t.Fatal("user list should stay loaded")
+	}
+	if len(got) != 1 || got[0].JIAIsuUUID != "keep" {
+		t.Fatalf("list=%+v", got)
+	}
+}
+
 func TestIsuMetaCacheDoesNotMarkUserLoadedOnSingleStore(t *testing.T) {
 	invalidateIsuMetaCache()
 	t.Cleanup(invalidateIsuMetaCache)

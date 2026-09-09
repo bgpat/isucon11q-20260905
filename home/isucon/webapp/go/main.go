@@ -100,6 +100,19 @@ func rememberIsuUUID(jiaIsuUUID string) {
 	isuUUIDCache.Store(jiaIsuUUID, struct{}{})
 }
 
+func forgetIsuUUID(jiaIsuUUID string) {
+	isuUUIDCache.Delete(jiaIsuUUID)
+}
+
+// abortUnactivatedIsu は activate 失敗時に、先に commit した isu 行とキャッシュを取り消す。
+func abortUnactivatedIsu(c echo.Context, jiaIsuUUID string) {
+	forgetIsuUUID(jiaIsuUUID)
+	forgetIsuMeta(jiaIsuUUID)
+	if _, err := db.Exec("DELETE FROM `isu` WHERE `jia_isu_uuid` = ?", jiaIsuUUID); err != nil {
+		c.Logger().Errorf("failed to delete unactivated isu %s: %v", jiaIsuUUID, err)
+	}
+}
+
 func invalidateIsuUUIDCache() {
 	isuUUIDCache.Range(func(key, _ interface{}) bool {
 		isuUUIDCache.Delete(key)
@@ -910,12 +923,14 @@ func postIsu(c echo.Context) error {
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	reqJIA, err := http.NewRequest(http.MethodPost, targetURL, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -923,6 +938,7 @@ func postIsu(c echo.Context) error {
 	res, err := http.DefaultClient.Do(reqJIA)
 	if err != nil {
 		c.Logger().Errorf("failed to request to JIAService: %v", err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	defer res.Body.Close()
@@ -930,11 +946,13 @@ func postIsu(c echo.Context) error {
 	resBody, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	if res.StatusCode != http.StatusAccepted {
 		c.Logger().Errorf("JIAService returned error: status code %v, message: %v", res.StatusCode, string(resBody))
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.String(res.StatusCode, "JIAService returned error")
 	}
 
@@ -942,12 +960,14 @@ func postIsu(c echo.Context) error {
 	err = json.Unmarshal(resBody, &isuFromJIA)
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	_, err = db.Exec("UPDATE `isu` SET `character` = ? WHERE  `jia_isu_uuid` = ?", isuFromJIA.Character, jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -1520,9 +1540,11 @@ func getTrend(c echo.Context) error {
 		return writeJSON(c, http.StatusOK, res)
 	}
 
+	// postIsu は character 無しで INSERT してから JIA activate する。
+	// その間の trend 再計算が NULL を Scan しないよう除外する。
 	characterList := []Isu{}
 	err := traceCall(ctx, "db.select_characters", func(context.Context) error {
-		return db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
+		return db.Select(&characterList, "SELECT `character` FROM `isu` WHERE `character` IS NOT NULL GROUP BY `character`")
 	})
 	if err != nil {
 		span.RecordError(err)
@@ -1537,7 +1559,7 @@ func getTrend(c echo.Context) error {
 		Character  string `db:"character"`
 	}{}
 	err = traceCall(ctx, "db.select_isu", func(context.Context) error {
-		return db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu`")
+		return db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu` WHERE `character` IS NOT NULL")
 	})
 	if err != nil {
 		span.RecordError(err)
