@@ -171,19 +171,9 @@ func invalidateSessionCache() {
 	sessionCache.Unlock()
 }
 
-// writeJSON は Echo 4.3.0 が e.Debug=true のとき c.JSON で出す pretty JSON と
+// writePrettyJSON は Echo 4.3.0 が e.Debug=true のとき c.JSON で出す pretty JSON と
 // 同じバイト列を書く。応答型は reflection なしで pretty を直接書く。
 // 末尾改行は Encoder.Encode に合わせる。
-func writeJSON(c echo.Context, code int, v interface{}) error {
-	p := getPrettyJSONBuf()
-	body, err := appendPrettyJSONValue(*p, v)
-	if err != nil {
-		putPrettyJSONBuf(p)
-		return err
-	}
-	return finishPrettyJSONWrite(c, code, p, body)
-}
-
 func writePrettyJSON[T any](c echo.Context, code int, v T, capHint int, enc func([]byte, T) []byte) error {
 	p := getPrettyJSONBuf()
 	body := append(enc(growBytes(*p, capHint), v), '\n')

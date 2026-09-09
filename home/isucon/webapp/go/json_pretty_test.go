@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	stdjson "encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,107 +9,65 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func TestAppendPrettyJSONMatchesStdIndent(t *testing.T) {
-	compacts := []string{
-		`null`,
-		`true`,
-		`false`,
-		`0`,
-		`-1.25`,
-		`""`,
-		`"hello"`,
-		`"a\"b\\c"`,
-		`"<>&"`,
-		`"{\",\":\"}"`,
-		`[]`,
-		`{}`,
-		`[1]`,
-		`[1,2,3]`,
-		`[[]]`,
-		`[{}]`,
-		`{"a":1}`,
-		`{"a":[]}`,
-		`{"a":{}}`,
-		`{"a":{"b":1},"c":[2,3]}`,
-		`[{"jia_isu_uuid":"u","isu_name":"isu <x>&","timestamp":1,"is_sitting":true,"condition":"is_dirty=true","condition_level":"warning","message":"hello\nworld"}]`,
-	}
-	for _, compact := range compacts {
-		var std bytes.Buffer
-		if err := stdjson.Indent(&std, []byte(compact), "", "  "); err != nil {
-			t.Fatalf("json.Indent %s: %v", compact, err)
-		}
-		got := appendPrettyJSON(nil, []byte(compact))
-		if !bytes.Equal(std.Bytes(), got) {
-			t.Fatalf("indent mismatch\nsrc: %s\nstd: %q\ngot: %q", compact, std.Bytes(), got)
-		}
-	}
-}
+func TestTypedPrettyJSONMatchesStd(t *testing.T) {
+	cond := benchConditionList()
+	condFallback := []*GetIsuConditionResponse{{
+		JIAIsuUUID:     "9e5c1109-beff-4598-b8f1-658d1994d55f",
+		IsuName:        "isu <x>&",
+		Timestamp:      1,
+		IsSitting:      true,
+		Condition:      "is_dirty=true,is_overweight=false,is_broken=false",
+		ConditionLevel: "weird<level>",
+		Message:        "hello\nworld",
+	}}
+	graph := benchGraphList()
+	init := InitializeResponse{Language: "go"}
+	me := GetMeResponse{JIAUserID: "user <id>&"}
+	isu := Isu{ID: 1, JIAIsuUUID: "9e5c1109-beff-4598-b8f1-658d1994d55f", Name: "n<x>", Character: "c&"}
 
-func TestMarshalPrettyJSONMatchesBaselines(t *testing.T) {
-	payloads := []struct {
+	cases := []struct {
 		name string
 		v    interface{}
+		got  []byte
 	}{
-		{"condition20", benchConditionList()},
-		{"graph24", benchGraphList()},
-		{"condition_level_fallback", []*GetIsuConditionResponse{{
-			JIAIsuUUID:     "9e5c1109-beff-4598-b8f1-658d1994d55f",
-			IsuName:        "isu <x>&",
-			Timestamp:      1,
-			IsSitting:      true,
-			Condition:      "is_dirty=true,is_overweight=false,is_broken=false",
-			ConditionLevel: "weird<level>",
-			Message:        "hello\nworld",
-		}}},
-		{"initialize", InitializeResponse{Language: "go"}},
-		{"me", GetMeResponse{JIAUserID: "user <id>&"}},
-		{"isu", Isu{ID: 1, JIAIsuUUID: "9e5c1109-beff-4598-b8f1-658d1994d55f", Name: "n<x>", Character: "c&"}},
+		{"condition20", cond, append(appendPrettyConditionList(nil, cond), '\n')},
+		{"graph24", graph, marshalPrettyGraph(graph)},
+		{"condition_level_fallback", condFallback, append(appendPrettyConditionList(nil, condFallback), '\n')},
+		{"initialize", init, append(appendPrettyInitialize(nil, init), '\n')},
+		{"me", me, append(appendPrettyMe(nil, me), '\n')},
+		{"isu", isu, append(appendPrettyIsu(nil, isu), '\n')},
 	}
-	for _, payload := range payloads {
-		std, err := marshalPrettyJSONStd(payload.v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		got, err := marshalPrettyJSON(payload.v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(got, std) {
-			n := 120
-			if len(got) < n {
-				n = len(got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			std, err := marshalPrettyJSONStd(tc.v)
+			if err != nil {
+				t.Fatal(err)
 			}
-			t.Fatalf("%s: Echo/std pretty mismatch len std=%d got=%d prefix=%q", payload.name, len(std), len(got), got[:n])
-		}
+			if !bytes.Equal(tc.got, std) {
+				n := 120
+				if len(tc.got) < n {
+					n = len(tc.got)
+				}
+				t.Fatalf("Echo/std pretty mismatch len std=%d got=%d prefix=%q", len(std), len(tc.got), tc.got[:n])
+			}
+		})
 	}
 }
 
-func TestMarshalPrettyGraphMatchesTyped(t *testing.T) {
-	list := benchGraphList()
-	got := marshalPrettyGraph(list)
-	want, err := marshalPrettyJSON(list)
+func TestWritePrettyJSONMatchesStd(t *testing.T) {
+	list := benchConditionList()
+	std, err := marshalPrettyJSONStd(list)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("marshalPrettyGraph mismatch")
-	}
-}
 
-func TestWritePrettyJSONMatchesWriteJSON(t *testing.T) {
-	list := benchConditionList()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-
-	recIface := httptest.NewRecorder()
-	if err := writeJSON(e.NewContext(req, recIface), http.StatusOK, list); err != nil {
+	rec := httptest.NewRecorder()
+	if err := writePrettyJSON(e.NewContext(req, rec), http.StatusOK, list, prettyConditionCap(list), appendPrettyConditionList); err != nil {
 		t.Fatal(err)
 	}
-	recTyped := httptest.NewRecorder()
-	if err := writePrettyJSON(e.NewContext(req, recTyped), http.StatusOK, list, prettyConditionCap(list), appendPrettyConditionList); err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(recIface.Body.Bytes(), recTyped.Body.Bytes()) {
-		t.Fatalf("typed write mismatch")
+	if !bytes.Equal(rec.Body.Bytes(), std) {
+		t.Fatalf("writePrettyJSON mismatch")
 	}
 }

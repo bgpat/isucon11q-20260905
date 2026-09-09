@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	jsonv2 "encoding/json/v2"
 	"testing"
 )
 
@@ -59,12 +58,9 @@ func marshalPrettyJSONStd(v interface{}) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func benchmarkMarshalPretty(b *testing.B, v interface{}) {
+func benchmarkMarshalPretty(b *testing.B, encode func() []byte, v interface{}) {
 	b.Helper()
-	got, err := marshalPrettyJSON(v)
-	if err != nil {
-		b.Fatal(err)
-	}
+	got := encode()
 	want, err := marshalPrettyJSONStd(v)
 	if err != nil {
 		b.Fatal(err)
@@ -75,21 +71,8 @@ func benchmarkMarshalPretty(b *testing.B, v interface{}) {
 
 	b.Run("typed_direct", func(b *testing.B) {
 		b.ReportAllocs()
-		switch x := v.(type) {
-		case []*GetIsuConditionResponse:
-			for i := 0; i < b.N; i++ {
-				p := getPrettyJSONBuf()
-				*p = append(appendPrettyConditionList(growBytes(*p, prettyConditionCap(x)), x), '\n')
-				putPrettyJSONBuf(p)
-			}
-		case []GraphResponse:
-			for i := 0; i < b.N; i++ {
-				p := getPrettyJSONBuf()
-				*p = append(appendPrettyGraphList(growBytes(*p, prettyGraphCap(x)), x), '\n')
-				putPrettyJSONBuf(p)
-			}
-		default:
-			b.Skip("no direct encoder")
+		for i := 0; i < b.N; i++ {
+			_ = encode()
 		}
 	})
 	b.Run("std_indent", func(b *testing.B) {
@@ -103,35 +86,23 @@ func benchmarkMarshalPretty(b *testing.B, v interface{}) {
 }
 
 func BenchmarkMarshalPrettyJSON_condition20(b *testing.B) {
-	benchmarkMarshalPretty(b, benchConditionList())
+	list := benchConditionList()
+	benchmarkMarshalPretty(b, func() []byte {
+		p := getPrettyJSONBuf()
+		*p = append(appendPrettyConditionList(growBytes(*p, prettyConditionCap(list)), list), '\n')
+		out := *p
+		putPrettyJSONBuf(p)
+		return out
+	}, list)
 }
 
 func BenchmarkMarshalPrettyJSON_graph24(b *testing.B) {
-	benchmarkMarshalPretty(b, benchGraphList())
-}
-
-func BenchmarkAppendPrettyJSON(b *testing.B) {
-	compact, err := jsonv2.Marshal(benchConditionList(), json.DefaultOptionsV1())
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.Run("naive", func(b *testing.B) {
-		b.ReportAllocs()
-		dst := make([]byte, 0, len(compact)*2)
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			dst = appendPrettyJSON(dst[:0], compact)
-		}
-	})
-	b.Run("json_Indent", func(b *testing.B) {
-		b.ReportAllocs()
-		var buf bytes.Buffer
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			buf.Reset()
-			if err := json.Indent(&buf, compact, "", "  "); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
+	list := benchGraphList()
+	benchmarkMarshalPretty(b, func() []byte {
+		p := getPrettyJSONBuf()
+		*p = append(appendPrettyGraphList(growBytes(*p, prettyGraphCap(list)), list), '\n')
+		out := *p
+		putPrettyJSONBuf(p)
+		return out
+	}, list)
 }

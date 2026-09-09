@@ -135,24 +135,21 @@ func TestInvalidateGraphCacheFromInsertArgs(t *testing.T) {
 	}
 }
 
-func TestMarshalPrettyJSONMatchesWriteJSON(t *testing.T) {
+func TestMarshalPrettyGraphMatchesWriteJSON(t *testing.T) {
 	res := []GraphResponse{
 		{StartAt: 0, EndAt: 3600, Data: nil, ConditionTimestamps: []int64{}},
 		{StartAt: 3600, EndAt: 7200, Data: &GraphDataPoint{Score: 66, Percentage: ConditionsPercentage{Sitting: 50}}, ConditionTimestamps: []int64{3600, 3610}},
 	}
-	body, err := marshalPrettyJSON(res)
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := marshalPrettyGraph(res)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	if err := writeJSON(e.NewContext(req, rec), http.StatusOK, res); err != nil {
+	if err := writePrettyJSON(e.NewContext(req, rec), http.StatusOK, res, prettyGraphCap(res), appendPrettyGraphList); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(rec.Body.Bytes(), body) {
-		t.Fatalf("writeJSON body mismatch\nwriteJSON: %s\nmarshal: %s", rec.Body.Bytes(), body)
+		t.Fatalf("writePrettyJSON body mismatch\nwritePrettyJSON: %s\nmarshal: %s", rec.Body.Bytes(), body)
 	}
 
 	rec2 := httptest.NewRecorder()

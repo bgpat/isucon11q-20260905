@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	jsonv2 "encoding/json/v2"
 	"strconv"
 	"sync"
 )
@@ -38,49 +36,8 @@ func growBytes(dst []byte, n int) []byte {
 	return make([]byte, 0, n)
 }
 
-func marshalPrettyJSON(v interface{}) ([]byte, error) {
-	p := getPrettyJSONBuf()
-	out, err := appendPrettyJSONValue(*p, v)
-	if err != nil {
-		putPrettyJSONBuf(p)
-		return nil, err
-	}
-	copied := make([]byte, len(out))
-	copy(copied, out)
-	*p = out
-	putPrettyJSONBuf(p)
-	return copied, nil
-}
-
 func marshalPrettyGraph(list []GraphResponse) []byte {
 	return append(appendPrettyGraphList(make([]byte, 0, prettyGraphCap(list)), list), '\n')
-}
-
-func appendPrettyJSONValue(dst []byte, v interface{}) ([]byte, error) {
-	switch x := v.(type) {
-	case []*GetIsuConditionResponse:
-		return append(appendPrettyConditionList(growBytes(dst, prettyConditionCap(x)), x), '\n'), nil
-	case []GraphResponse:
-		return append(appendPrettyGraphList(growBytes(dst, prettyGraphCap(x)), x), '\n'), nil
-	case []GetIsuListResponse:
-		return append(appendPrettyIsuList(growBytes(dst, prettyIsuListCap(x)), x), '\n'), nil
-	case []TrendResponse:
-		return append(appendPrettyTrendList(growBytes(dst, prettyTrendCap(x)), x), '\n'), nil
-	case InitializeResponse:
-		return append(appendPrettyInitialize(growBytes(dst, 256), x), '\n'), nil
-	case GetMeResponse:
-		return append(appendPrettyMe(growBytes(dst, 256), x), '\n'), nil
-	case Isu:
-		return append(appendPrettyIsu(growBytes(dst, 256), x), '\n'), nil
-	default:
-		compact, err := jsonv2.Marshal(v, json.DefaultOptionsV1())
-		if err != nil {
-			return nil, err
-		}
-		dst = growBytes(dst, len(compact)+len(compact)/2+1)
-		dst = appendPrettyJSON(dst, compact)
-		return append(dst, '\n'), nil
-	}
 }
 
 func prettyConditionCap(x []*GetIsuConditionResponse) int {
@@ -431,67 +388,4 @@ func appendPrettyIsu(dst []byte, v Isu) []byte {
 	dst = append(dst, ",\n  \"character\": "...)
 	dst = appendJSONString(dst, v.Character)
 	return append(dst, "\n}"...)
-}
-
-// appendPrettyJSON は compact JSON に Echo / encoding/json.Indent("", "  ") と同じ
-// 空白を足す。型スイッチに無い値のフォールバック用。
-func appendPrettyJSON(dst, src []byte) []byte {
-	depth := 0
-	inString := false
-	escape := false
-	for i := 0; i < len(src); i++ {
-		c := src[i]
-		if inString {
-			dst = append(dst, c)
-			if escape {
-				escape = false
-			} else if c == '\\' {
-				escape = true
-			} else if c == '"' {
-				inString = false
-			}
-			continue
-		}
-		switch c {
-		case ' ', '\t', '\n', '\r':
-			continue
-		case '"':
-			inString = true
-			dst = append(dst, c)
-		case '{', '[':
-			dst = append(dst, c)
-			j := i + 1
-			for j < len(src) && (src[j] == ' ' || src[j] == '\t' || src[j] == '\n' || src[j] == '\r') {
-				j++
-			}
-			if j < len(src) && ((c == '{' && src[j] == '}') || (c == '[' && src[j] == ']')) {
-				continue
-			}
-			depth++
-			dst = append(dst, '\n')
-			dst = appendPrettyIndent(dst, depth)
-		case '}', ']':
-			if n := len(dst); n > 0 && dst[n-1] != '{' && dst[n-1] != '[' {
-				depth--
-				dst = append(dst, '\n')
-				dst = appendPrettyIndent(dst, depth)
-			}
-			dst = append(dst, c)
-		case ',':
-			dst = append(dst, c, '\n')
-			dst = appendPrettyIndent(dst, depth)
-		case ':':
-			dst = append(dst, c, ' ')
-		default:
-			dst = append(dst, c)
-		}
-	}
-	return dst
-}
-
-func appendPrettyIndent(dst []byte, depth int) []byte {
-	for i := 0; i < depth; i++ {
-		dst = append(dst, ' ', ' ')
-	}
-	return dst
 }
