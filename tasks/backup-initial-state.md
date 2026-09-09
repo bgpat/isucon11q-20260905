@@ -151,7 +151,12 @@ git status --short /tmp/isucon-work/backup
 
 # 作業後の記録
 
-- 実行日時:
-- 対象サーバー:
-- アーカイブサイズ:
-- Release:
+- 実行日時: 2026-09-06 03:42–03:43 JST
+- 対象サーバー: isucon1〜3
+- 取得対象: 各 `isucondition` ダンプと `/home/isucon/webapp/sql/1_InitData.sql`
+- アーカイブサイズ: ダンプ各 770,895 bytes、`1_InitData.sql` 各 769,103 bytes（gzip）
+- 保存先: リポジトリ外 `/tmp/isucon-work/backup/`。Git 履歴には追加していない
+- Release: https://github.com/bgpat/isucon11q-20260905/releases/tag/db-initial-20260906-0343
+- 関連: #9
+- 2026-09-08 のインスタンス作り直し後もこの Release を使う。#299 は共通タスク再作成時の重複であり、再取得していない
+- 復旧: 対象サーバーの既存 `/etc/mysql/debian.cnf` を使い、gzip 展開後に `mysql` へ投入する。初期 SQL は実機の `1_InitData.sql` として使う

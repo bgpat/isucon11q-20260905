@@ -139,8 +139,25 @@ done
 
 # 作業後の記録
 
-- 実行日時:
-- SSH Host 名:
-- 名前解決の有無:
-- バックアップ先:
-- 接続確認結果:
+## 2026-09-06（#19）
+
+- SSH Host 名: `isucon1`〜`isucon3`
+- 初回ユーザー: `isucon`。初期化後: `root`
+- IdentityFile: `~/.ssh/id_ed25519`（リポジトリ外）
+- 名前解決の追加: なし（Public IP を HostName に直接指定）
+- 3台で `whoami` / `hostname` / `hostname -I` を確認
+
+## 2026-09-08 インスタンス作り直し後（#305）
+
+Public IP は作り直し後のユーザー提供値。
+
+| Host | HostName | 初期化後 User |
+| --- | --- | --- |
+| isucon1 | 18.177.215.25 | root |
+| isucon2 | 3.113.46.84 | root |
+| isucon3 | 13.113.66.178 | root |
+
+- ホスト鍵が変わっていたため、ローカル `known_hosts` の旧鍵を削除して再登録した
+- ローカル `~/.ssh/config` の User を `root` に変更。編集前バックアップはリポジトリ外
+- 3台とも `ssh isuconN` で root 接続を確認
+- 関連: #19 #305 #341
