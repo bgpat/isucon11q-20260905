@@ -70,8 +70,6 @@
 0644:0:0:home/isucon/webapp/go/access_log_buffer_test.go
 0644:0:0:home/isucon/webapp/go/bind_json.go
 0644:0:0:home/isucon/webapp/go/bind_json_test.go
-0644:0:0:home/isucon/webapp/go/condition_batch.go
-0644:0:0:home/isucon/webapp/go/condition_batch_test.go
 0644:0:0:home/isucon/webapp/go/condition_store.go
 0644:0:0:home/isucon/webapp/go/condition_store_test.go
 0644:0:0:home/isucon/webapp/go/drop_condition_log_test.go
