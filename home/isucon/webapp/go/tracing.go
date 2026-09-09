@@ -57,11 +57,8 @@ func initTracing() (func(context.Context) error, error) {
 		return func(context.Context) error { return nil }, nil
 	}
 	ctx := context.Background()
-	endpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "127.0.0.1:4318")
-	exp, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(endpoint),
-		otlptracehttp.WithInsecure(),
-	)
+	// OTEL_EXPORTER_OTLP_* 環境変数から OTLP/HTTP exporter を構成する。
+	exp, err := otlptracehttp.New(ctx)
 	if err != nil {
 		return nil, err
 	}
