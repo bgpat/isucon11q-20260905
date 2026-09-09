@@ -162,6 +162,16 @@ install-valkey:
 	test "$$(id -u)" -eq 0
 	/ops/install-valkey.sh
 
+.PHONY: collect-valkey
+collect-valkey:
+	test "$$(id -u)" -eq 0
+	/ops/collect-valkey.sh snapshot
+
+.PHONY: reset-valkey-stats
+reset-valkey-stats:
+	test "$$(id -u)" -eq 0
+	/ops/collect-valkey.sh reset
+
 .PHONY: install-nginx-custom
 install-nginx-custom:
 	test "$$(id -u)" -eq 0
