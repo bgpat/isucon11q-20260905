@@ -112,21 +112,34 @@ install_binary() {
 }
 
 install_custom_config() {
-  mkdir -p /etc/nginx-custom
-  python3 - "${CUSTOM_CONF}" <<'PY'
-from pathlib import Path
-import sys
+  local site_available="/etc/nginx-custom/sites-available/isucondition.conf"
+  local site_enabled="/etc/nginx-custom/sites-enabled/isucondition.conf"
 
-dst = Path(sys.argv[1])
-src = Path("/etc/nginx/nginx.conf").read_text()
-src = src.replace("    ssl_conf_command Options KTLS;\n", "")
-if "ssl_conf_command" in src:
-    raise SystemExit("ssl_conf_command が残っている")
-dst.write_text(src)
-PY
+  if [[ ! -f "${CUSTOM_CONF}" ]]; then
+    echo "設定がありません: ${CUSTOM_CONF}" >&2
+    echo "先に git pull して /etc/nginx-custom を入れてください" >&2
+    exit 1
+  fi
+  if [[ ! -f "${site_available}" ]]; then
+    echo "設定がありません: ${site_available}" >&2
+    echo "先に git pull して /etc/nginx-custom を入れてください" >&2
+    exit 1
+  fi
+  if grep -F "ssl_conf_command" "${CUSTOM_CONF}" >/dev/null; then
+    echo "${CUSTOM_CONF} に ssl_conf_command がある" >&2
+    exit 1
+  fi
   if grep -F "ssl_conf_command" /etc/nginx/nginx.conf >/dev/null; then
     echo "/etc/nginx/nginx.conf に ssl_conf_command がある" >&2
     exit 1
+  fi
+  if grep -F "include /etc/nginx/sites-enabled" "${CUSTOM_CONF}" >/dev/null; then
+    echo "カスタム nginx.conf が付属の sites-enabled を読んでいる" >&2
+    exit 1
+  fi
+  mkdir -p /etc/nginx-custom/sites-enabled
+  if [[ ! -e "${site_enabled}" ]]; then
+    ln -s ../sites-available/isucondition.conf "${site_enabled}"
   fi
 }
 
@@ -167,7 +180,7 @@ test_custom_config
 
 echo "カスタム nginx を入れました: $("${NGINX_SBIN}" -v 2>&1)"
 echo "現行 nginx は残しています: $("${UBUNTU_NGINX}" -v 2>&1)"
-echo "設定: ${CUSTOM_CONF}（kTLS なし）"
+echo "設定: ${CUSTOM_CONF}（Git 管理。付属 /etc/nginx のサイト設定は読まない）"
 echo "再起動後は nginx-custom が起動します。このスクリプトでは 443 を切り替えません。"
 echo "今すぐ切り替えるとき:"
 echo "  systemctl stop nginx.service"
