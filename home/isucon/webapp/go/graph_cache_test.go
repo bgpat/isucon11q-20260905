@@ -113,6 +113,36 @@ func TestGraphCacheInvalidateOverlappingHours(t *testing.T) {
 	}
 }
 
+func TestGraphCacheSetIfGenDiscardsStale(t *testing.T) {
+	invalidateGraphCache()
+	t.Cleanup(invalidateGraphCache)
+
+	key := graphCacheKey{jiaUserID: "u", jiaIsuUUID: "isu", startUnix: 1628521200}
+	_, seen, ok := graphCacheLookup(key)
+	if ok {
+		t.Fatal("expected miss")
+	}
+	invalidateGraphCacheForConditions("isu", []time.Time{time.Unix(1628521200, 0)})
+	if graphCacheSetIfGen(key, []byte("stale\n"), seen) {
+		t.Fatal("stale generate should not be stored")
+	}
+	if _, ok := graphCacheGet(key); ok {
+		t.Fatal("cache should stay empty after discarded set")
+	}
+
+	_, seen, ok = graphCacheLookup(key)
+	if ok {
+		t.Fatal("expected miss before fresh set")
+	}
+	if !graphCacheSetIfGen(key, []byte("fresh\n"), seen) {
+		t.Fatal("matching gen should store")
+	}
+	got, ok := graphCacheGet(key)
+	if !ok || string(got) != "fresh\n" {
+		t.Fatalf("got %q ok=%v", got, ok)
+	}
+}
+
 func TestMarshalPrettyJSONMatchesWriteJSON(t *testing.T) {
 	res := []GraphResponse{
 		{StartAt: 0, EndAt: 3600, Data: nil, ConditionTimestamps: []int64{}},
