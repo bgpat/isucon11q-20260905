@@ -40,6 +40,10 @@ func marshalPrettyGraph(list []GraphResponse) []byte {
 	return append(appendPrettyGraphList(make([]byte, 0, prettyGraphCap(list)), list), '\n')
 }
 
+func marshalPrettyTrend(list []TrendResponse) []byte {
+	return append(appendPrettyTrendList(make([]byte, 0, prettyTrendCap(list)), list), '\n')
+}
+
 func prettyConditionCap(x []*GetIsuConditionResponse) int {
 	if x == nil {
 		return 8
