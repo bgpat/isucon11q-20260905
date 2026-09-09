@@ -449,6 +449,13 @@ func NewMySQLConnectionEnv() *MySQLConnectionEnv {
 
 func (mc *MySQLConnectionEnv) ConnectDB() (*sqlx.DB, error) {
 	dsn := fmt.Sprintf("%v:%v@tcp(%v:%v)/%v?parseTime=true&loc=Asia%%2FTokyo&interpolateParams=true", mc.User, mc.Password, mc.Host, mc.Port, mc.DBName)
+	if tracingEnabled() {
+		sqlDB, err := openTracedSQL(dsn)
+		if err != nil {
+			return nil, err
+		}
+		return sqlx.NewDb(sqlDB, "mysql"), nil
+	}
 	return sqlx.Open("mysql", dsn)
 }
 
@@ -499,6 +506,13 @@ func main() {
 	if getEnv("ENABLE_PPROF", "0") == "1" {
 		e.GET("/debug/pprof/*", echo.WrapHandler(http.DefaultServeMux))
 	}
+	shutdownTracing, err := initTracing()
+	if err != nil {
+		e.Logger.Warnf("tracing init failed: %v", err)
+		shutdownTracing = func(context.Context) error { return nil }
+	}
+	defer shutdownTracing(context.Background())
+	e.Use(echoTraceMiddleware())
 
 	e.POST("/initialize", postInitialize)
 
@@ -524,7 +538,6 @@ func main() {
 
 	mySQLConnectionData = NewMySQLConnectionEnv()
 
-	var err error
 	db, err = mySQLConnectionData.ConnectDB()
 	if err != nil {
 		e.Logger.Fatalf("failed to connect db: %v", err)
@@ -927,7 +940,7 @@ func postIsu(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	reqJIA, err := http.NewRequest(http.MethodPost, targetURL, bytes.NewBuffer(bodyJSON))
+	reqJIA, err := http.NewRequestWithContext(c.Request().Context(), http.MethodPost, targetURL, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		c.Logger().Error(err)
 		abortUnactivatedIsu(c, jiaIsuUUID)
@@ -935,7 +948,7 @@ func postIsu(c echo.Context) error {
 	}
 
 	reqJIA.Header.Set("Content-Type", "application/json")
-	res, err := http.DefaultClient.Do(reqJIA)
+	res, err := doJIARequest(c.Request().Context(), reqJIA)
 	if err != nil {
 		c.Logger().Errorf("failed to request to JIAService: %v", err)
 		abortUnactivatedIsu(c, jiaIsuUUID)
@@ -1518,15 +1531,21 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
+	ctx := c.Request().Context()
+	span := spanFromContext(ctx)
+
 	if body, ok := loadTrendJSONIfUsable(); ok {
+		setSpanBool(span, "trend.cache_hit", true)
 		return writeJSONBytes(c, http.StatusOK, body)
 	}
+	setSpanBool(span, "trend.cache_hit", false)
 
 	// 再計算は trendComputeMu だけ直列化する。trendCache は持たないので
 	// POST /api/condition の markTrendCacheDirty は待たない。
-	trendComputeMu.Lock()
-	defer trendComputeMu.Unlock()
+	ctx, unlock := traceLock(ctx, "trendComputeMu", &trendComputeMu)
+	defer unlock()
 	if body, ok := loadTrendJSONIfUsable(); ok {
+		setSpanBool(span, "trend.cache_hit_after_lock", true)
 		return writeJSONBytes(c, http.StatusOK, body)
 	}
 	if body, ok := refreshTrendJSONFromMemory(); ok {
@@ -1537,31 +1556,37 @@ func getTrend(c echo.Context) error {
 	// postIsu は character 無しで INSERT してから JIA activate する。
 	// その間の trend 再計算が NULL を Scan しないよう除外する。
 	characterList := []Isu{}
-	err := db.Select(&characterList, "SELECT `character` FROM `isu` WHERE `character` IS NOT NULL GROUP BY `character`")
+	err := db.SelectContext(ctx, &characterList, "SELECT `character` FROM `isu` WHERE `character` IS NOT NULL GROUP BY `character`")
 	if err != nil {
+		recordSpanError(span, err)
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	setSpanInt(span, "trend.character_count", len(characterList))
 
 	isuRows := []struct {
 		ID         int    `db:"id"`
 		JIAIsuUUID string `db:"jia_isu_uuid"`
 		Character  string `db:"character"`
 	}{}
-	err = db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu` WHERE `character` IS NOT NULL")
+	err = db.SelectContext(ctx, &isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu` WHERE `character` IS NOT NULL")
 	if err != nil {
+		recordSpanError(span, err)
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	setSpanInt(span, "trend.isu_count", len(isuRows))
 	uuids := make([]string, 0, len(isuRows))
 	for _, row := range isuRows {
 		uuids = append(uuids, row.JIAIsuUUID)
 	}
-	latestByUUID, err := getLatestConditionsFromValkey(c.Request().Context(), uuids)
+	latestByUUID, err := getLatestConditionsFromValkey(ctx, uuids)
 	if err != nil {
+		recordSpanError(span, err)
 		c.Logger().Errorf("valkey error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	setSpanInt(span, "trend.latest_count", len(latestByUUID))
 
 	info := map[string][]*TrendCondition{}
 	warning := map[string][]*TrendCondition{}
@@ -1604,6 +1629,7 @@ func getTrend(c echo.Context) error {
 	for _, row := range items {
 		conditionLevel, err := calculateConditionLevel(row.condition)
 		if err != nil {
+			recordSpanError(span, err)
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
@@ -1628,6 +1654,7 @@ func getTrend(c echo.Context) error {
 		})
 	}
 	storeTrendCache(gen, res)
+	setSpanInt(span, "trend.item_count", len(items))
 	if body, ok := loadTrendJSONIfUsable(); ok {
 		return writeJSONBytes(c, http.StatusOK, body)
 	}
