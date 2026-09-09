@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+func seedTrendCache(res []TrendResponse) {
+	gen, _, _ := snapshotTrendCache()
+	storeTrendCache(gen, res)
+}
+
 func TestTrendCacheStaleStoreIsIgnored(t *testing.T) {
 	invalidateTrendCache()
 	t.Cleanup(invalidateTrendCache)
@@ -53,5 +58,37 @@ func TestInvalidateTrendCacheDoesNotNeedComputeMu(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("invalidateTrendCache blocked while trendComputeMu is held")
+	}
+}
+
+func TestTrendDirtyKeepsCacheWithinInterval(t *testing.T) {
+	invalidateTrendCache()
+	t.Cleanup(invalidateTrendCache)
+
+	seedTrendCache([]TrendResponse{{Character: "a"}})
+	markTrendCacheDirty()
+	got, ok := loadTrendCacheIfUsable()
+	if !ok || len(got) != 1 || got[0].Character != "a" {
+		t.Fatalf("got=%v ok=%v", got, ok)
+	}
+}
+
+func TestTrendDirtyMissesAfterInterval(t *testing.T) {
+	invalidateTrendCache()
+	t.Cleanup(invalidateTrendCache)
+
+	seedTrendCache([]TrendResponse{{Character: "a"}})
+	markTrendCacheDirty()
+	trendComputedAt.Store(time.Now().Add(-trendRecomputeMinInterval - time.Millisecond).UnixNano())
+	if _, ok := loadTrendCacheIfUsable(); ok {
+		t.Fatal("dirty cache older than interval should miss")
+	}
+}
+
+func TestInvalidateTrendCacheMissesImmediately(t *testing.T) {
+	seedTrendCache([]TrendResponse{{Character: "a"}})
+	invalidateTrendCache()
+	if _, ok := loadTrendCacheIfUsable(); ok {
+		t.Fatal("hard invalidate should miss")
 	}
 }

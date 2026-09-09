@@ -1,9 +1,27 @@
 package main
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+	"time"
+)
 
-// 再計算用。invalidateTrendCache は取らない。
-var trendComputeMu sync.Mutex
+const trendRecomputeMinInterval = 200 * time.Millisecond
+
+var (
+	trendComputeMu  sync.Mutex
+	trendDirty      atomic.Bool
+	trendComputedAt atomic.Int64
+)
+
+func markTrendCacheDirty() {
+	trendDirty.Store(true)
+}
+
+func noteTrendCacheRecomputed() {
+	trendDirty.Store(false)
+	trendComputedAt.Store(time.Now().UnixNano())
+}
 
 func loadTrendCache() ([]TrendResponse, bool) {
 	trendCache.RLock()
@@ -31,6 +49,7 @@ func storeTrendCache(gen uint64, res []TrendResponse) {
 	}
 	trendCache.response = res
 	trendCache.valid = true
+	noteTrendCacheRecomputed()
 }
 
 func invalidateTrendCache() {
@@ -39,4 +58,29 @@ func invalidateTrendCache() {
 	trendCache.response = nil
 	trendCache.gen++
 	trendCache.Unlock()
+	trendDirty.Store(false)
+	trendComputedAt.Store(0)
+}
+
+func trendCacheUsableLocked() bool {
+	if !trendCache.valid {
+		return false
+	}
+	if !trendDirty.Load() {
+		return true
+	}
+	t := trendComputedAt.Load()
+	if t == 0 {
+		return false
+	}
+	return time.Now().UnixNano()-t < int64(trendRecomputeMinInterval)
+}
+
+func loadTrendCacheIfUsable() ([]TrendResponse, bool) {
+	trendCache.RLock()
+	defer trendCache.RUnlock()
+	if !trendCacheUsableLocked() {
+		return nil, false
+	}
+	return trendCache.response, true
 }
