@@ -36,20 +36,20 @@ import (
 )
 
 const (
-	sessionName                 = "isucondition_go"
-	conditionLimit              = 20
-	frontendContentsPath        = "../public"
-	jiaJWTSigningKeyPath        = "../ec256-public.pem"
-	defaultIconFilePath         = "../NoImage.jpg"
-	isuIconCacheDir             = "/home/isucon/webapp/public/.isucondition-icon-cache"
-	isuIconInternalPath         = "/_isucondition_icon_cache/"
-	defaultJIAServiceURL        = "http://localhost:5000"
-	mysqlErrNumDuplicateEntry   = 1062
-	sessionCacheTTL             = 30 * time.Second
-	sessionCacheMaxEntries      = 10000
-	dropConditionLogIdle        = 10 * time.Second
-	benchLoadDuration           = 60 * time.Second
-	accessLogFlushDelay         = benchLoadDuration + dropConditionLogIdle
+	sessionName               = "isucondition_go"
+	conditionLimit            = 20
+	frontendContentsPath      = "../public"
+	jiaJWTSigningKeyPath      = "../ec256-public.pem"
+	defaultIconFilePath       = "../NoImage.jpg"
+	isuIconCacheDir           = "/home/isucon/webapp/public/.isucondition-icon-cache"
+	isuIconInternalPath       = "/_isucondition_icon_cache/"
+	defaultJIAServiceURL      = "http://localhost:5000"
+	mysqlErrNumDuplicateEntry = 1062
+	sessionCacheTTL           = 30 * time.Second
+	sessionCacheMaxEntries    = 10000
+	dropConditionLogIdle      = 10 * time.Second
+	benchLoadDuration         = 60 * time.Second
+	accessLogFlushDelay       = benchLoadDuration + dropConditionLogIdle
 	// #165: 10% 刻み二分探索。最初の2点は端の 0% と中点の 40%。
 	dropConditionProbability    = 0.0
 	conditionLevelInfo          = "info"
@@ -94,6 +94,7 @@ var (
 	iconFileCache sync.Map
 	graphCache    struct {
 		sync.Mutex
+		gen uint64
 		// jiaIsuUUID -> startUnix -> jiaUserID -> body
 		entries map[string]map[int64]map[string][]byte
 	}
@@ -1089,11 +1090,12 @@ func getIsuGraph(c echo.Context) error {
 	}
 	date := time.Unix(datetimeInt64, 0).Truncate(time.Hour)
 	cacheKey := graphCacheKey{jiaUserID: jiaUserID, jiaIsuUUID: jiaIsuUUID, startUnix: date.Unix()}
-	if body, ok := graphCacheGet(cacheKey); ok {
+	body, seenGen, ok := graphCacheLookup(cacheKey)
+	if ok {
 		return writeJSONBytes(c, http.StatusOK, body)
 	}
 
-	_, ok, err := ownedIsuMeta(jiaIsuUUID, jiaUserID)
+	_, ok, err = ownedIsuMeta(jiaIsuUUID, jiaUserID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1108,11 +1110,11 @@ func getIsuGraph(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	body, err := marshalPrettyJSON(res)
+	body, err = marshalPrettyJSON(res)
 	if err != nil {
 		return err
 	}
-	graphCacheSet(cacheKey, body)
+	graphCacheSetIfGen(cacheKey, body, seenGen)
 	return writeJSONBytes(c, http.StatusOK, body)
 }
 
@@ -1669,27 +1671,9 @@ func postIsuCondition(c echo.Context) error {
 	if jiaIsuUUID == "" {
 		return c.String(http.StatusBadRequest, "missing: jia_isu_uuid")
 	}
-	req := make([]PostIsuConditionRequest, 0, postIsuConditionBindCap)
-	if err := c.Bind(&req); err != nil {
+	records, timestamps, err := readPostIsuConditionRecords(c.Request().Body)
+	if err != nil || len(records) == 0 {
 		return c.String(http.StatusBadRequest, "bad request body")
-	} else if len(req) == 0 {
-		return c.String(http.StatusBadRequest, "bad request body")
-	}
-
-	records := make([]conditionRecord, 0, len(req))
-	timestamps := make([]time.Time, 0, len(req))
-	for _, cond := range req {
-		if !isValidConditionFormat(cond.Condition) {
-			return c.String(http.StatusBadRequest, "bad request body")
-		}
-		ts := time.Unix(cond.Timestamp, 0)
-		records = append(records, conditionRecord{
-			Timestamp: ts,
-			IsSitting: cond.IsSitting,
-			Condition: cond.Condition,
-			Message:   cond.Message,
-		})
-		timestamps = append(timestamps, ts)
 	}
 
 	// 正の uuid / メタデータキャッシュに無ければ 1 回だけ確認する。404 はキャッシュしない。
