@@ -87,7 +87,7 @@ func initValkeyClient() error {
 	if err != nil {
 		return err
 	}
-	valkeyClient = client
+	valkeyClient = wrapValkeyClient(client)
 	return nil
 }
 
