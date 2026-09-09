@@ -485,6 +485,12 @@ func main() {
 	if getEnv("ENABLE_PPROF", "0") == "1" {
 		e.GET("/debug/pprof/*", echo.WrapHandler(http.DefaultServeMux))
 	}
+	shutdownTracing, err := initTracing()
+	if err != nil {
+		e.Logger.Warnf("tracing init failed: %v", err)
+		shutdownTracing = func(context.Context) error { return nil }
+	}
+	defer shutdownTracing(context.Background())
 
 	e.POST("/initialize", postInitialize)
 
@@ -510,7 +516,6 @@ func main() {
 
 	mySQLConnectionData = NewMySQLConnectionEnv()
 
-	var err error
 	db, err = mySQLConnectionData.ConnectDB()
 	if err != nil {
 		e.Logger.Fatalf("failed to connect db: %v", err)
@@ -1493,46 +1498,71 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
+	ctx, span := startTrace(c.Request().Context(), "GET /api/trend")
+	defer span.End()
+	c.SetRequest(c.Request().WithContext(ctx))
+
 	if res, ok := loadTrendCache(); ok {
+		span.Bool("trend.cache_hit", true)
 		return writeJSON(c, http.StatusOK, res)
 	}
+	span.Bool("trend.cache_hit", false)
 
 	// 再計算は trendComputeMu だけ直列化する。trendCache は持たないので
 	// POST /api/condition の invalidate は待たない。
+	waitStart := time.Now()
 	trendComputeMu.Lock()
+	span.Int64("trend.lock_wait_ms", time.Since(waitStart).Milliseconds())
 	defer trendComputeMu.Unlock()
 	gen, res, hit := snapshotTrendCache()
 	if hit {
+		span.Bool("trend.cache_hit_after_lock", true)
 		return writeJSON(c, http.StatusOK, res)
 	}
 
 	characterList := []Isu{}
-	err := db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
+	err := traceCall(ctx, "db.select_characters", func(context.Context) error {
+		return db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
+	})
 	if err != nil {
+		span.RecordError(err)
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	span.Int("trend.character_count", len(characterList))
 
 	isuRows := []struct {
 		ID         int    `db:"id"`
 		JIAIsuUUID string `db:"jia_isu_uuid"`
 		Character  string `db:"character"`
 	}{}
-	err = db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu`")
+	err = traceCall(ctx, "db.select_isu", func(context.Context) error {
+		return db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu`")
+	})
 	if err != nil {
+		span.RecordError(err)
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	span.Int("trend.isu_count", len(isuRows))
 	uuids := make([]string, 0, len(isuRows))
 	for _, row := range isuRows {
 		uuids = append(uuids, row.JIAIsuUUID)
 	}
-	latestByUUID, err := getLatestConditionsFromValkey(c.Request().Context(), uuids)
+	var latestByUUID map[string]conditionRecord
+	err = traceCall(ctx, "valkey.mget_latest", func(ctx context.Context) error {
+		var verr error
+		latestByUUID, verr = getLatestConditionsFromValkey(ctx, uuids)
+		return verr
+	})
 	if err != nil {
+		span.RecordError(err)
 		c.Logger().Errorf("valkey error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	span.Int("trend.latest_count", len(latestByUUID))
 
+	_, assembleSpan := startTrace(ctx, "assemble")
 	info := map[string][]*TrendCondition{}
 	warning := map[string][]*TrendCondition{}
 	critical := map[string][]*TrendCondition{}
@@ -1574,6 +1604,8 @@ func getTrend(c echo.Context) error {
 	for _, row := range items {
 		conditionLevel, err := calculateConditionLevel(row.condition)
 		if err != nil {
+			assembleSpan.RecordError(err)
+			assembleSpan.End()
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
@@ -1598,7 +1630,16 @@ func getTrend(c echo.Context) error {
 		})
 	}
 	storeTrendCache(gen, res)
-	return writeJSON(c, http.StatusOK, res)
+	assembleSpan.Int("trend.item_count", len(items))
+	assembleSpan.End()
+
+	err = traceCall(ctx, "json.encode", func(context.Context) error {
+		return writeJSON(c, http.StatusOK, res)
+	})
+	if err != nil {
+		span.RecordError(err)
+	}
+	return err
 }
 
 func noteDroppedIsuCondition() {

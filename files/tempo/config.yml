@@ -1,0 +1,46 @@
+# Tempo 分散クラスタ（#366）。全競技サーバーが同一構成で参加する。
+# - distributor: OTLP 127.0.0.1:4318
+# - ingester + querier + query-frontend: ローカル storage、ring 経由で全ノードを横断 query
+# /ops/render-tempo-config.sh がプレースホルダ行を置換する。
+stream_over_http_enabled: true
+
+server:
+  http_listen_address: 127.0.0.1
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 127.0.0.1:4318
+        grpc:
+          endpoint: 127.0.0.1:4317
+
+ingester:
+  max_block_duration: 5m
+  lifecycler:
+    address: __TEMPO_INSTANCE_ADDR__
+    ring:
+      kvstore:
+        store: memberlist
+      replication_factor: 1
+    num_tokens: 128
+    heartbeat_period: 5s
+
+memberlist:
+  abort_if_cluster_join_fails: false
+  bind_port: 7946
+  join_members:
+__TEMPO_JOIN_MEMBERS__
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /tmp/tempo/wal
+    local:
+      path: /tmp/tempo/blocks
+
+usage_report:
+  reporting_enabled: false

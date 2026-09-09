@@ -69,6 +69,8 @@ make monitoring
 
 Access to 3999 port from your browser.
 
+Grafana OSS 13.2.1 と Tempo 2.6.1 も同じ `make monitoring` で nohup 起動する。systemd には入れないので、サーバー再起動後は自動では立ち上がらない。Tempo は全競技サーバーが同一クラスタ（distributor + ingester + querier + query-frontend）に参加する。memberlist は `/files/hosts/ip-192-168-0-*` から `/ops/render-tempo-config.sh` が生成する。Grafana はどのサーバーで起動しても Explore の Tempo（ローカル `:3200`）から ring 全体の trace をまとめて見られる。アプリは `ENABLE_TRACING=1`（`/etc/isucondition-observability.env`）のときローカル distributor へ送る。提出用計測では `ENABLE_TRACING=0` にしてアプリを再起動する（#12）。
+
 ### edit config file
 
 ```bash
