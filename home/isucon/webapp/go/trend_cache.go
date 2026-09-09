@@ -39,4 +39,5 @@ func invalidateTrendCache() {
 	trendCache.response = nil
 	trendCache.gen++
 	trendCache.Unlock()
+	resetTrendFlight()
 }
