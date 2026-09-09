@@ -21,7 +21,6 @@ const (
 
 var (
 	graphTraceOn  atomic.Bool
-	graphTraceGen atomic.Uint64
 	graphTraceMu  sync.Mutex
 	graphTraceOut *os.File
 )
@@ -55,12 +54,16 @@ func graphTraceEnabled() bool {
 	return graphTraceOn.Load()
 }
 
-func graphTraceBumpGen() uint64 {
-	return graphTraceGen.Add(1)
+func graphTraceCurrentGen() uint64 {
+	return graphCacheCurrentGen()
 }
 
-func graphTraceCurrentGen() uint64 {
-	return graphTraceGen.Load()
+func graphTraceBumpGen() uint64 {
+	graphCache.Lock()
+	graphCache.gen++
+	g := graphCache.gen
+	graphCache.Unlock()
+	return g
 }
 
 func graphTraceLog(msg string) {
@@ -178,7 +181,7 @@ func graphTraceGenerated(key graphCacheKey, res []GraphResponse, seenGen uint64)
 		key.jiaIsuUUID, key.jiaUserID, key.startUnix, n, lastHourN, has, seenGen))
 }
 
-func graphTraceSet(key graphCacheKey, body []byte, seenGen uint64) {
+func graphTraceSet(key graphCacheKey, body []byte, seenGen uint64, stored bool) {
 	if !graphTraceEnabled() {
 		return
 	}
@@ -187,6 +190,10 @@ func graphTraceSet(key graphCacheKey, body []byte, seenGen uint64) {
 	if nowGen != seenGen {
 		stale = 1
 	}
+	kept := 0
+	if stored {
+		kept = 1
+	}
 	has := 0
 	if graphBodyHasWatchTS(body) {
 		has = 1
@@ -194,23 +201,21 @@ func graphTraceSet(key graphCacheKey, body []byte, seenGen uint64) {
 	if stale == 0 && !graphTraceWatchDayKey(key.startUnix) && !graphTraceWatchUUIDKey(key.jiaIsuUUID) {
 		return
 	}
-	graphTraceLog(fmt.Sprintf("ev=graph_set uuid=%s user=%s start=%d has_watch=%d gen_seen=%d gen_now=%d stale=%d",
-		key.jiaIsuUUID, key.jiaUserID, key.startUnix, has, seenGen, nowGen, stale))
+	graphTraceLog(fmt.Sprintf("ev=graph_set uuid=%s user=%s start=%d has_watch=%d gen_seen=%d gen_now=%d stale=%d stored=%d",
+		key.jiaIsuUUID, key.jiaUserID, key.startUnix, has, seenGen, nowGen, stale, kept))
 }
 
-func graphTraceInvalidateAll() {
+func graphTraceInvalidateAll(gen uint64) {
 	if !graphTraceEnabled() {
 		return
 	}
-	gen := graphTraceBumpGen()
 	graphTraceLog(fmt.Sprintf("ev=graph_inv_all gen=%d", gen))
 }
 
-func graphTraceInvalidate(jiaIsuUUID string, timestamps []time.Time, deletedWatchDay bool) {
+func graphTraceInvalidate(jiaIsuUUID string, timestamps []time.Time, deletedWatchDay bool, gen uint64) {
 	if !graphTraceEnabled() {
 		return
 	}
-	gen := graphTraceBumpGen()
 	if !deletedWatchDay && !graphTraceWatchUUIDKey(jiaIsuUUID) {
 		return
 	}

@@ -56,9 +56,9 @@ func TestGraphTraceWritesWatchLines(t *testing.T) {
 
 	key := graphCacheKey{jiaUserID: "u", jiaIsuUUID: graphTraceWatchUUID, startUnix: graphTraceWatchDay}
 	graphTraceMiss(key, 1)
-	graphTraceSet(key, []byte("1628693950"), 1)
+	graphTraceSet(key, []byte("1628693950"), 1, true)
 	graphTraceBumpGen()
-	graphTraceSet(key, []byte("[]"), 1)
+	graphTraceSet(key, []byte("[]"), 1, false)
 
 	if err := f.Sync(); err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestGraphTraceWritesWatchLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(raw)
-	if !strings.Contains(got, "ev=graph_miss") || !strings.Contains(got, "stale=1") {
+	if !strings.Contains(got, "ev=graph_miss") || !strings.Contains(got, "stale=1") || !strings.Contains(got, "stored=0") {
 		t.Fatalf("log=%q", got)
 	}
 }

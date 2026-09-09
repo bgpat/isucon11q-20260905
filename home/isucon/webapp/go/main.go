@@ -94,6 +94,7 @@ var (
 	iconFileCache sync.Map
 	graphCache    struct {
 		sync.Mutex
+		gen uint64
 		// jiaIsuUUID -> startUnix -> jiaUserID -> body
 		entries map[string]map[int64]map[string][]byte
 	}
@@ -1070,14 +1071,14 @@ func getIsuGraph(c echo.Context) error {
 	}
 	date := time.Unix(datetimeInt64, 0).Truncate(time.Hour)
 	cacheKey := graphCacheKey{jiaUserID: jiaUserID, jiaIsuUUID: jiaIsuUUID, startUnix: date.Unix()}
-	seenGen := graphTraceCurrentGen()
-	if body, ok := graphCacheGet(cacheKey); ok {
+	body, seenGen, ok := graphCacheLookup(cacheKey)
+	if ok {
 		graphTraceHit(cacheKey, body)
 		return writeJSONBytes(c, http.StatusOK, body)
 	}
 	graphTraceMiss(cacheKey, seenGen)
 
-	_, ok, err := ownedIsuMeta(jiaIsuUUID, jiaUserID)
+	_, ok, err = ownedIsuMeta(jiaIsuUUID, jiaUserID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1092,13 +1093,13 @@ func getIsuGraph(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	body, err := marshalPrettyJSON(res)
+	body, err = marshalPrettyJSON(res)
 	if err != nil {
 		return err
 	}
 	graphTraceGenerated(cacheKey, res, seenGen)
-	graphCacheSet(cacheKey, body)
-	graphTraceSet(cacheKey, body, seenGen)
+	stored := graphCacheSetIfGen(cacheKey, body, seenGen)
+	graphTraceSet(cacheKey, body, seenGen, stored)
 	return writeJSONBytes(c, http.StatusOK, body)
 }
 
