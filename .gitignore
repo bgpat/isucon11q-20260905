@@ -83,3 +83,17 @@
 /home/isucon/webapp/go/*
 !/home/isucon/webapp/go/tracing.go
 
+# /etc/nginx-custom
+/*
+!/etc
+/etc/*
+!/etc/nginx-custom
+/etc/nginx-custom/*
+!/etc/nginx-custom/nginx.conf
+!/etc/nginx-custom/sites-available
+/etc/nginx-custom/sites-available/*
+!/etc/nginx-custom/sites-available/isucondition.conf
+!/etc/nginx-custom/sites-enabled
+/etc/nginx-custom/sites-enabled/*
+!/etc/nginx-custom/sites-enabled/isucondition.conf
+
