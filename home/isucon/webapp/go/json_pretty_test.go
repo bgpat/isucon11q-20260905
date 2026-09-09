@@ -24,6 +24,12 @@ func TestTypedPrettyJSONMatchesStd(t *testing.T) {
 	init := InitializeResponse{Language: "go"}
 	me := GetMeResponse{JIAUserID: "user <id>&"}
 	isu := Isu{ID: 1, JIAIsuUUID: "9e5c1109-beff-4598-b8f1-658d1994d55f", Name: "n<x>", Character: "c&"}
+	trend := []TrendResponse{{
+		Character: "cute",
+		Info:      []*TrendCondition{{ID: 12, Timestamp: 1622640527}},
+		Warning:   []*TrendCondition{},
+		Critical:  nil,
+	}}
 
 	cases := []struct {
 		name string
@@ -36,6 +42,7 @@ func TestTypedPrettyJSONMatchesStd(t *testing.T) {
 		{"initialize", init, append(appendPrettyInitialize(nil, init), '\n')},
 		{"me", me, append(appendPrettyMe(nil, me), '\n')},
 		{"isu", isu, append(appendPrettyIsu(nil, isu), '\n')},
+		{"trend", trend, marshalPrettyTrend(trend)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

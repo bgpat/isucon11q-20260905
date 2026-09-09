@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json/jsontext"
 	"strconv"
 )
 
@@ -14,122 +12,13 @@ type trendJSONLoc struct {
 }
 
 func encodeTrendJSON(res []TrendResponse) ([]byte, map[int]trendJSONLoc, error) {
-	body := marshalPrettyTrend(res)
-	locs, err := indexTrendJSON(body)
-	if err != nil {
-		return nil, nil, err
+	n := 0
+	for i := range res {
+		n += len(res[i].Info) + len(res[i].Warning) + len(res[i].Critical)
 	}
+	locs := make(map[int]trendJSONLoc, n)
+	body := append(appendPrettyTrendListLocs(make([]byte, 0, prettyTrendCap(res)), res, locs), '\n')
 	return body, locs, nil
-}
-
-func indexTrendJSON(body []byte) (map[int]trendJSONLoc, error) {
-	locs := make(map[int]trendJSONLoc)
-	dec := jsontext.NewDecoder(bytes.NewReader(body))
-	if _, err := dec.ReadToken(); err != nil {
-		return nil, err
-	}
-	for dec.PeekKind() != ']' {
-		if _, err := dec.ReadToken(); err != nil {
-			return nil, err
-		}
-		for dec.PeekKind() != '}' {
-			key, err := dec.ReadToken()
-			if err != nil {
-				return nil, err
-			}
-			switch key.String() {
-			case "info", "warning", "critical":
-				level := key.String()
-				if err := indexTrendLevelArray(dec, body, locs, level); err != nil {
-					return nil, err
-				}
-			default:
-				if err := dec.SkipValue(); err != nil {
-					return nil, err
-				}
-			}
-		}
-		if _, err := dec.ReadToken(); err != nil {
-			return nil, err
-		}
-	}
-	if _, err := dec.ReadToken(); err != nil {
-		return nil, err
-	}
-	return locs, nil
-}
-
-func indexTrendLevelArray(dec *jsontext.Decoder, body []byte, locs map[int]trendJSONLoc, level string) error {
-	if dec.PeekKind() == 'n' {
-		return dec.SkipValue()
-	}
-	if _, err := dec.ReadToken(); err != nil {
-		return err
-	}
-	for dec.PeekKind() != ']' {
-		if _, err := dec.ReadToken(); err != nil {
-			return err
-		}
-		var id int
-		for dec.PeekKind() != '}' {
-			field, err := dec.ReadToken()
-			if err != nil {
-				return err
-			}
-			switch field.String() {
-			case "isu_id":
-				tok, err := dec.ReadToken()
-				if err != nil {
-					return err
-				}
-				n, err := tok.Int()
-				if err != nil {
-					return err
-				}
-				id = int(n)
-			case "timestamp":
-				tok, err := dec.ReadToken()
-				if err != nil {
-					return err
-				}
-				ts, err := tok.Int()
-				if err != nil {
-					return err
-				}
-				off, n := trendTimestampSpan(body, int(dec.InputOffset()), ts)
-				locs[id] = trendJSONLoc{tsOff: off, tsLen: n, ts: ts, level: level}
-			default:
-				if err := dec.SkipValue(); err != nil {
-					return err
-				}
-			}
-		}
-		if _, err := dec.ReadToken(); err != nil {
-			return err
-		}
-	}
-	_, err := dec.ReadToken()
-	return err
-}
-
-func trendTimestampSpan(body []byte, end int, ts int64) (int, int) {
-	digits := strconv.FormatInt(ts, 10)
-	if end > len(body) {
-		end = len(body)
-	}
-	start := end - len(digits)
-	if start >= 0 && start+len(digits) <= len(body) && bytes.Equal(body[start:start+len(digits)], []byte(digits)) {
-		return start, len(digits)
-	}
-	searchEnd := end
-	if searchEnd > len(body) {
-		searchEnd = len(body)
-	}
-	start = bytes.LastIndex(body[:searchEnd], []byte(digits))
-	if start < 0 {
-		return 0, 0
-	}
-	return start, len(digits)
 }
 
 func trendItemBefore(ts1 int64, id1 int, ts2 int64, id2 int) bool {

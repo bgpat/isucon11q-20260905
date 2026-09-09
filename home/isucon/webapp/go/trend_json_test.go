@@ -35,8 +35,11 @@ func TestEncodeTrendJSONMatchesPrettyJSONAndIndexesTimestamps(t *testing.T) {
 			t.Fatalf("isu_id=%d timestamp bytes=%q loc=%+v", item.ID, got, loc)
 		}
 	}
-	if locs[12].level != conditionLevelInfo || locs[3].level != conditionLevelCritical {
+	if locs[12].level != conditionLevelInfo || locs[1].level != conditionLevelInfo || locs[3].level != conditionLevelCritical {
 		t.Fatalf("level map=%v", locs)
+	}
+	if len(locs) != 3 {
+		t.Fatalf("locs=%d want 3: %v", len(locs), locs)
 	}
 }
 

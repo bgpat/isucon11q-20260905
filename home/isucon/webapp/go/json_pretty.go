@@ -315,6 +315,10 @@ func appendPrettyIsuListObj(dst []byte, item *GetIsuListResponse) []byte {
 }
 
 func appendPrettyTrendList(dst []byte, list []TrendResponse) []byte {
+	return appendPrettyTrendListLocs(dst, list, nil)
+}
+
+func appendPrettyTrendListLocs(dst []byte, list []TrendResponse, locs map[int]trendJSONLoc) []byte {
 	if list == nil {
 		return append(dst, "null"...)
 	}
@@ -327,24 +331,24 @@ func appendPrettyTrendList(dst []byte, list []TrendResponse) []byte {
 			dst = append(dst, ',')
 		}
 		dst = append(dst, "\n  "...)
-		dst = appendPrettyTrendObj(dst, &list[i])
+		dst = appendPrettyTrendObj(dst, &list[i], locs)
 	}
 	return append(dst, "\n]"...)
 }
 
-func appendPrettyTrendObj(dst []byte, t *TrendResponse) []byte {
+func appendPrettyTrendObj(dst []byte, t *TrendResponse, locs map[int]trendJSONLoc) []byte {
 	dst = append(dst, "{\n    \"character\": "...)
 	dst = appendJSONString(dst, t.Character)
 	dst = append(dst, ",\n    \"info\": "...)
-	dst = appendPrettyTrendConditions(dst, t.Info)
+	dst = appendPrettyTrendConditions(dst, t.Info, conditionLevelInfo, locs)
 	dst = append(dst, ",\n    \"warning\": "...)
-	dst = appendPrettyTrendConditions(dst, t.Warning)
+	dst = appendPrettyTrendConditions(dst, t.Warning, conditionLevelWarning, locs)
 	dst = append(dst, ",\n    \"critical\": "...)
-	dst = appendPrettyTrendConditions(dst, t.Critical)
+	dst = appendPrettyTrendConditions(dst, t.Critical, conditionLevelCritical, locs)
 	return append(dst, "\n  }"...)
 }
 
-func appendPrettyTrendConditions(dst []byte, list []*TrendCondition) []byte {
+func appendPrettyTrendConditions(dst []byte, list []*TrendCondition, level string, locs map[int]trendJSONLoc) []byte {
 	if list == nil {
 		return append(dst, "null"...)
 	}
@@ -364,7 +368,11 @@ func appendPrettyTrendConditions(dst []byte, list []*TrendCondition) []byte {
 		dst = append(dst, "{\n        \"isu_id\": "...)
 		dst = appendJSONInt(dst, int64(c.ID))
 		dst = append(dst, ",\n        \"timestamp\": "...)
+		tsOff := len(dst)
 		dst = appendJSONInt(dst, c.Timestamp)
+		if locs != nil {
+			locs[c.ID] = trendJSONLoc{tsOff: tsOff, tsLen: len(dst) - tsOff, ts: c.Timestamp, level: level}
+		}
 		dst = append(dst, "\n      }"...)
 	}
 	return append(dst, "\n    ]"...)
