@@ -161,3 +161,19 @@ Public IP は作り直し後のユーザー提供値。
 - ローカル `~/.ssh/config` の User を `root` に変更。編集前バックアップはリポジトリ外
 - 3台とも `ssh isuconN` で root 接続を確認
 - 関連: #19 #305 #341
+
+## 2026-09-09 isucon3 作り直し後（#371）
+
+Public IP は作り直し後に VPC 内で確認した値。
+
+| Host | HostName | 初期化後 User |
+| --- | --- | --- |
+| isucon1 | 18.177.215.25 | root |
+| isucon2 | 3.113.46.84 | root |
+| isucon3 | 54.92.69.228 | root |
+
+- 旧 `13.113.66.178` は不通。hostname は `ip-192-168-0-13` から `ip-192-168-0-10` に変わった
+- ホスト鍵が変わっていたため、ローカル `known_hosts` の旧鍵を削除して再登録した
+- ローカル `~/.ssh/config` の isucon3 HostName を更新。User は既に `root`。編集前バックアップはリポジトリ外
+- `ssh isucon3` で root 接続を確認
+- 関連: #19 #371

@@ -236,3 +236,16 @@ done
 - 同期後の commit: `70d7250`。3台とも working tree clean、root で SSH 可能
 - sudoers / sshd_config は初回と同様 Git 未追跡のまま
 - 関連: #305 #341。初期データは再取得せず Release `db-initial-20260906-0343`（#9）を使う
+
+## 2026-09-09 isucon3 作り直し後（#371）
+
+- 実行日時: 2026-09-09 22:00–22:08 JST
+- 対象: isucon3 のみ。isucon1 / isucon2 は触っていない
+- 旧 Public IP `13.113.66.178`（`ip-192-168-0-13`）は TCP/22 timeout。私有 IP `192.168.0.13` も到達不能
+- 同一サブネットの未初期化ホスト `192.168.0.10`（Public IP `54.92.69.228`、hostname `ip-192-168-0-10`）を接続確認して再セットアップした
+- `/.git` なしを確認し、`git reset --hard` で origin/master を載せた
+- deploy key を再発行し、旧 `isucon3-root` を削除して write 付きで再登録した
+- Go 1.27.1、Valkey 9.0.6（起動・enable なし）、nginx-custom 1.30.4 を導入
+- ベース同期後の master: `f61cccc`。その後ユーザー指示により PR #368（`obs/issue-366-tempo` / `7940949`）を checkout して `deploy-app`
+- `ssh isucon3` で root 接続可能。ローカル `~/.ssh/config` の HostName を更新した
+- 関連: #371 #368。初期データは再取得していない
