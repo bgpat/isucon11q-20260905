@@ -11,6 +11,7 @@ require (
 	github.com/labstack/echo/v4 v4.3.0
 	github.com/labstack/gommon v0.3.0
 	github.com/valkey-io/valkey-go v1.0.77
+	golang.org/x/sync v0.23.0
 )
 
 require (

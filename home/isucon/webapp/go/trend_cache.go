@@ -60,6 +60,7 @@ func invalidateTrendCache() {
 	trendCache.Unlock()
 	trendDirty.Store(false)
 	trendComputedAt.Store(0)
+	resetTrendFlight()
 }
 
 func trendCacheUsableLocked() bool {
