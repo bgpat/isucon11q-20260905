@@ -42,12 +42,18 @@ func snapshotTrendCache() (gen uint64, res []TrendResponse, hit bool) {
 }
 
 func storeTrendCache(gen uint64, res []TrendResponse) {
+	body, locs, err := encodeTrendJSON(res)
+	if err != nil {
+		return
+	}
 	trendCache.Lock()
 	defer trendCache.Unlock()
 	if trendCache.gen != gen {
 		return
 	}
 	trendCache.response = res
+	trendCache.body = body
+	trendCache.locs = locs
 	trendCache.valid = true
 	noteTrendCacheRecomputed()
 }
@@ -56,6 +62,8 @@ func invalidateTrendCache() {
 	trendCache.Lock()
 	trendCache.valid = false
 	trendCache.response = nil
+	trendCache.body = nil
+	trendCache.locs = nil
 	trendCache.gen++
 	trendCache.Unlock()
 	trendDirty.Store(false)
@@ -63,7 +71,7 @@ func invalidateTrendCache() {
 }
 
 func trendCacheUsableLocked() bool {
-	if !trendCache.valid {
+	if !trendCache.valid || len(trendCache.body) == 0 {
 		return false
 	}
 	if !trendDirty.Load() {
@@ -83,4 +91,29 @@ func loadTrendCacheIfUsable() ([]TrendResponse, bool) {
 		return nil, false
 	}
 	return trendCache.response, true
+}
+
+func loadTrendJSONIfUsable() ([]byte, bool) {
+	trendCache.RLock()
+	defer trendCache.RUnlock()
+	if !trendCacheUsableLocked() {
+		return nil, false
+	}
+	return trendCache.body, true
+}
+
+func refreshTrendJSONFromMemory() ([]byte, bool) {
+	trendCache.Lock()
+	defer trendCache.Unlock()
+	if !trendCache.valid || trendCache.response == nil {
+		return nil, false
+	}
+	body, locs, err := encodeTrendJSON(trendCache.response)
+	if err != nil {
+		return nil, false
+	}
+	trendCache.body = body
+	trendCache.locs = locs
+	noteTrendCacheRecomputed()
+	return body, true
 }
