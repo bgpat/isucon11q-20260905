@@ -48,6 +48,8 @@ const (
 	sessionCacheTTL             = 30 * time.Second
 	sessionCacheMaxEntries      = 10000
 	dropConditionLogIdle        = 10 * time.Second
+	benchLoadDuration           = 60 * time.Second
+	accessLogFlushDelay         = benchLoadDuration + dropConditionLogIdle
 	// #165: 10% 刻み二分探索。最初の2点は端の 0% と中点の 40%。
 	dropConditionProbability    = 0.0
 	conditionLevelInfo          = "info"
@@ -80,6 +82,7 @@ var (
 	dropConditionPending uint64
 	dropConditionTotal   uint64
 	dropConditionLogger  echo.Logger
+	accessLogWriter      *deferredLogWriter
 	prettyJSONBufPool    = sync.Pool{
 		New: func() interface{} {
 			return new(bytes.Buffer)
@@ -493,7 +496,10 @@ func main() {
 	dropConditionLogger = e.Logger
 	startDropConditionLogFlusher()
 
-	e.Use(middleware.Logger())
+	accessLogWriter = newDeferredLogWriter(os.Stdout)
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+		Output: accessLogWriter,
+	}))
 	e.Use(middleware.Recover())
 	if getEnv("ENABLE_PPROF", "0") == "1" {
 		e.GET("/debug/pprof/*", echo.WrapHandler(http.DefaultServeMux))
@@ -618,6 +624,10 @@ func getJIAServiceURL(db *sqlx.DB) string {
 // POST /initialize
 // サービスを初期化
 func postInitialize(c echo.Context) error {
+	if accessLogWriter != nil {
+		accessLogWriter.startBuffering(accessLogFlushDelay)
+	}
+
 	var request InitializeRequest
 	err := c.Bind(&request)
 	if err != nil {
