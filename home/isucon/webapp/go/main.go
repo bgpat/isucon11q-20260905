@@ -103,6 +103,19 @@ func rememberIsuUUID(jiaIsuUUID string) {
 	isuUUIDCache.Store(jiaIsuUUID, struct{}{})
 }
 
+func forgetIsuUUID(jiaIsuUUID string) {
+	isuUUIDCache.Delete(jiaIsuUUID)
+}
+
+// abortUnactivatedIsu は activate 失敗時に、先に commit した isu 行とキャッシュを取り消す。
+func abortUnactivatedIsu(c echo.Context, jiaIsuUUID string) {
+	forgetIsuUUID(jiaIsuUUID)
+	forgetIsuMeta(jiaIsuUUID)
+	if _, err := db.Exec("DELETE FROM `isu` WHERE `jia_isu_uuid` = ?", jiaIsuUUID); err != nil {
+		c.Logger().Errorf("failed to delete unactivated isu %s: %v", jiaIsuUUID, err)
+	}
+}
+
 func invalidateIsuUUIDCache() {
 	isuUUIDCache.Range(func(key, _ interface{}) bool {
 		isuUUIDCache.Delete(key)
@@ -907,12 +920,14 @@ func postIsu(c echo.Context) error {
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	reqJIA, err := http.NewRequest(http.MethodPost, targetURL, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -920,6 +935,7 @@ func postIsu(c echo.Context) error {
 	res, err := http.DefaultClient.Do(reqJIA)
 	if err != nil {
 		c.Logger().Errorf("failed to request to JIAService: %v", err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	defer res.Body.Close()
@@ -927,11 +943,13 @@ func postIsu(c echo.Context) error {
 	resBody, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	if res.StatusCode != http.StatusAccepted {
 		c.Logger().Errorf("JIAService returned error: status code %v, message: %v", res.StatusCode, string(resBody))
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.String(res.StatusCode, "JIAService returned error")
 	}
 
@@ -939,12 +957,14 @@ func postIsu(c echo.Context) error {
 	err = json.Unmarshal(resBody, &isuFromJIA)
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	_, err = db.Exec("UPDATE `isu` SET `character` = ? WHERE  `jia_isu_uuid` = ?", isuFromJIA.Character, jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -1495,18 +1515,18 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
-	if res, ok := loadTrendCache(); ok {
+	if res, ok := loadTrendCacheIfUsable(); ok {
 		return writeJSON(c, http.StatusOK, res)
 	}
 
 	// 再計算は trendComputeMu だけ直列化する。trendCache は持たないので
-	// POST /api/condition の invalidate は待たない。
+	// POST /api/condition の markTrendCacheDirty は待たない。
 	trendComputeMu.Lock()
 	defer trendComputeMu.Unlock()
-	gen, res, hit := snapshotTrendCache()
-	if hit {
+	if res, ok := loadTrendCacheIfUsable(); ok {
 		return writeJSON(c, http.StatusOK, res)
 	}
+	gen, _, _ := snapshotTrendCache()
 
 	characterList := []Isu{}
 	err := db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
@@ -1590,7 +1610,7 @@ func getTrend(c echo.Context) error {
 		}
 	}
 
-	res = make([]TrendResponse, 0, len(characterList))
+	res := make([]TrendResponse, 0, len(characterList))
 	for _, character := range characterList {
 		res = append(res, TrendResponse{
 			Character: character.Character,
@@ -1688,7 +1708,7 @@ func postIsuCondition(c echo.Context) error {
 		c.Logger().Errorf("valkey error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	invalidateTrendCache()
+	markTrendCacheDirty()
 	invalidateGraphCacheForConditions(jiaIsuUUID, timestamps)
 	return c.NoContent(http.StatusAccepted)
 }
