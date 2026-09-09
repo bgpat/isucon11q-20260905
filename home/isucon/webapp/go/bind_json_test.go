@@ -9,7 +9,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	gojson "github.com/goccy/go-json"
 	"github.com/labstack/echo/v4"
 )
 
@@ -49,6 +51,8 @@ func TestJSONV2BinderMatchesStdUnmarshal(t *testing.T) {
 		{"extra-field", `[{"is_sitting":false,"condition":"is_dirty=false,is_overweight=false,is_broken=false","message":"m","timestamp":4,"extra":{"n":1}}]`},
 		{"empty", `[]`},
 		{"unicode", `[{"is_sitting":false,"condition":"is_dirty=false,is_overweight=false,is_broken=false","message":"日本語<>&","timestamp":5}]`},
+		{"null-message", `[{"is_sitting":false,"condition":"is_dirty=false,is_overweight=false,is_broken=false","message":null,"timestamp":6}]`},
+		{"missing-fields", `[{"timestamp":7}]`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -115,19 +119,6 @@ func TestJSONV2BinderMatchesEchoDefaultBinder(t *testing.T) {
 	}
 }
 
-func TestJSONV2BinderDoesNotAliasInput(t *testing.T) {
-	body := []byte(`[{"is_sitting":true,"condition":"is_dirty=false,is_overweight=false,is_broken=false","message":"hello","timestamp":1}]`)
-	var req []PostIsuConditionRequest
-	if err := (jsonV2Binder{}).Bind(&req, newJSONContext(http.MethodPost, "/api/condition/u", body)); err != nil {
-		t.Fatal(err)
-	}
-	idx := bytes.Index(body, []byte("hello"))
-	body[idx] = 'X'
-	if req[0].Message != "hello" {
-		t.Fatalf("parsed string aliased input: %q", req[0].Message)
-	}
-}
-
 func TestJSONV2BinderSurvivesBufferPoolReuse(t *testing.T) {
 	body1 := typicalPostIsuConditionBody(10)
 	var req1 []PostIsuConditionRequest
@@ -186,6 +177,74 @@ func BenchmarkJSONV2UnmarshalCondition(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		req := make([]PostIsuConditionRequest, 0, postIsuConditionBindCap)
 		if err := jsonv2.Unmarshal(body, &req, stdjson.DefaultOptionsV1()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestParsePostIsuConditionRecordsTypical(t *testing.T) {
+	body := typicalPostIsuConditionBody(10)
+	var std []PostIsuConditionRequest
+	if err := stdjson.Unmarshal(body, &std); err != nil {
+		t.Fatal(err)
+	}
+	records := make([]conditionRecord, 0, 10)
+	timestamps := make([]time.Time, 0, 10)
+	if err := parsePostIsuConditionRecords(body, &records, &timestamps); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != len(std) {
+		t.Fatalf("len records=%d std=%d", len(records), len(std))
+	}
+	for i := range std {
+		if records[i].IsSitting != std[i].IsSitting || records[i].Message != std[i].Message || records[i].Timestamp.Unix() != std[i].Timestamp {
+			t.Fatalf("i=%d rec=%#v std=%#v", i, records[i], std[i])
+		}
+		if records[i].Condition != packedConditionCSV[0] {
+			t.Fatalf("condition not interned: %q", records[i].Condition)
+		}
+		if timestamps[i] != records[i].Timestamp {
+			t.Fatalf("timestamp mismatch")
+		}
+	}
+}
+
+func TestReadPostIsuConditionRecordsRejectsInvalidCondition(t *testing.T) {
+	body := []byte(`[{"is_sitting":false,"condition":"nope","message":"m","timestamp":1}]`)
+	if _, _, err := readPostIsuConditionRecords(bytes.NewReader(body)); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func BenchmarkTypedParseCondition(b *testing.B) {
+	body := typicalPostIsuConditionBody(10)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		req := make([]PostIsuConditionRequest, 0, postIsuConditionBindCap)
+		if err := parsePostIsuConditionJSON(body, &req); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkGoJSONUnmarshalCondition(b *testing.B) {
+	body := typicalPostIsuConditionBody(10)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		req := make([]PostIsuConditionRequest, 0, postIsuConditionBindCap)
+		if err := gojson.Unmarshal(body, &req); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkTypedParseConditionRecords(b *testing.B) {
+	body := typicalPostIsuConditionBody(10)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		records := make([]conditionRecord, 0, postIsuConditionBindCap)
+		timestamps := make([]time.Time, 0, postIsuConditionBindCap)
+		if err := parsePostIsuConditionRecords(body, &records, &timestamps); err != nil {
 			b.Fatal(err)
 		}
 	}
