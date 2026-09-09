@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -646,7 +645,11 @@ func postInitialize(c echo.Context) error {
 		c.Logger().Errorf("valkey load error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	invalidateTrendCache()
+	resetTrendMemoryIndex()
+	if err := warmTrendMemoryIndex(c.Request().Context()); err != nil {
+		c.Logger().Errorf("trend warm error: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
 	invalidateSessionCache()
 	invalidateIsuUUIDCache()
 	invalidateIsuMetaCache()
@@ -986,7 +989,7 @@ func postIsu(c echo.Context) error {
 	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
 		c.Logger().Errorf("failed to cache icon: %v", err)
 	}
-	invalidateTrendCache()
+	registerTrendMemoryIsu(jiaIsuUUID, meta.ID, meta.Character)
 
 	return writeJSON(c, http.StatusCreated, isu)
 }
@@ -1513,113 +1516,11 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
-	if res, ok := loadTrendCache(); ok {
-		return writeJSON(c, http.StatusOK, res)
-	}
-
-	// 再計算は trendComputeMu だけ直列化する。trendCache は持たないので
-	// POST /api/condition の invalidate は待たない。
-	trendComputeMu.Lock()
-	defer trendComputeMu.Unlock()
-	gen, res, hit := snapshotTrendCache()
-	if hit {
-		return writeJSON(c, http.StatusOK, res)
-	}
-
-	// postIsu は character 無しで INSERT してから JIA activate する。
-	// その間の trend 再計算が NULL を Scan しないよう除外する。
-	characterList := []Isu{}
-	err := db.Select(&characterList, "SELECT `character` FROM `isu` WHERE `character` IS NOT NULL GROUP BY `character`")
+	res, err := getTrendFromMemory(c.Request().Context())
 	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
+		c.Logger().Errorf("trend error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-
-	isuRows := []struct {
-		ID         int    `db:"id"`
-		JIAIsuUUID string `db:"jia_isu_uuid"`
-		Character  string `db:"character"`
-	}{}
-	err = db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu` WHERE `character` IS NOT NULL")
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	uuids := make([]string, 0, len(isuRows))
-	for _, row := range isuRows {
-		uuids = append(uuids, row.JIAIsuUUID)
-	}
-	latestByUUID, err := getLatestConditionsFromValkey(c.Request().Context(), uuids)
-	if err != nil {
-		c.Logger().Errorf("valkey error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-
-	info := map[string][]*TrendCondition{}
-	warning := map[string][]*TrendCondition{}
-	critical := map[string][]*TrendCondition{}
-	for _, character := range characterList {
-		info[character.Character] = []*TrendCondition{}
-		warning[character.Character] = []*TrendCondition{}
-		critical[character.Character] = []*TrendCondition{}
-	}
-
-	type trendItem struct {
-		id        int
-		character string
-		timestamp int64
-		condition string
-	}
-	items := make([]trendItem, 0, len(isuRows))
-	for _, row := range isuRows {
-		latest, ok := latestByUUID[row.JIAIsuUUID]
-		if !ok {
-			continue
-		}
-		items = append(items, trendItem{
-			id:        row.ID,
-			character: row.Character,
-			timestamp: latest.Timestamp.Unix(),
-			condition: latest.Condition,
-		})
-	}
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].character != items[j].character {
-			return items[i].character < items[j].character
-		}
-		if items[i].timestamp != items[j].timestamp {
-			return items[i].timestamp > items[j].timestamp
-		}
-		return items[i].id > items[j].id
-	})
-
-	for _, row := range items {
-		conditionLevel, err := calculateConditionLevel(row.condition)
-		if err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-		trendCondition := &TrendCondition{ID: row.id, Timestamp: row.timestamp}
-		switch conditionLevel {
-		case conditionLevelInfo:
-			info[row.character] = append(info[row.character], trendCondition)
-		case conditionLevelWarning:
-			warning[row.character] = append(warning[row.character], trendCondition)
-		case conditionLevelCritical:
-			critical[row.character] = append(critical[row.character], trendCondition)
-		}
-	}
-
-	res = make([]TrendResponse, 0, len(characterList))
-	for _, character := range characterList {
-		res = append(res, TrendResponse{
-			Character: character.Character,
-			Info:      info[character.Character],
-			Warning:   warning[character.Character],
-			Critical:  critical[character.Character],
-		})
-	}
-	storeTrendCache(gen, res)
 	return writeJSON(c, http.StatusOK, res)
 }
 
@@ -1720,7 +1621,7 @@ func postIsuConditionLegacy(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	invalidateTrendCache()
+	markTrendMemoryNotReady()
 
 	return c.NoContent(http.StatusAccepted)
 }
@@ -1774,7 +1675,7 @@ func postIsuCondition(c echo.Context) error {
 		c.Logger().Errorf("valkey error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	invalidateTrendCache()
+	applyTrendMemoryConditions(jiaIsuUUID, records)
 	invalidateGraphCacheForConditions(jiaIsuUUID, timestamps)
 	return c.NoContent(http.StatusAccepted)
 }
