@@ -236,3 +236,17 @@ done
 - 同期後の commit: `70d7250`。3台とも working tree clean、root で SSH 可能
 - sudoers / sshd_config は初回と同様 Git 未追跡のまま
 - 関連: #305 #341。初期データは再取得せず Release `db-initial-20260906-0343`（#9）を使う
+
+## 2026-09-09 isucon2 / isucon3 作り直し後（#377）
+
+- 実行日時: 2026-09-09 23:25–23:45 JST
+- 対象:
+  - isucon2 `3.113.46.84`（ip-192-168-0-12）
+  - isucon3 `13.113.66.178`（ip-192-168-0-13）
+- どちらも `/.git` なしを確認し、`git reset --hard` で origin/master を載せた
+- deploy key を再発行し、write 付きで登録した（`isucon2-root` / `isucon3-13-root`）
+- Go 1.27.1 と Valkey 9.0.6 を再導入。起動と enable はしない（isucon1 のみ）
+- nginx-custom 1.30.4 を入れ、443 を切り替えた。付属 nginx 1.18.0 は残して disable
+- 同期後の commit: `430d653`。どちらも `ssh isuconN` で root 接続できる
+- isucon1 と #371 の代替ホスト `54.92.69.228`（`ip-192-168-0-10`）は触っていない
+- 関連: #377。初期データは再取得せず Release `db-initial-20260906-0343`（#9）を使う
