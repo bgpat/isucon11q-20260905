@@ -17,7 +17,6 @@ const (
 	conditionZKeyPrefix      = "cond:z:"
 	conditionLatestKeyPrefix = "cond:latest:"
 	conditionKeyScanMatch    = "cond:*"
-	isucon1Hostname          = "ip-192-168-0-11"
 	valkeyUnixSocketPath     = "/run/valkey/valkey.sock"
 	conditionListFetchFactor = 8
 	conditionListFetchMin    = 64
@@ -66,23 +65,11 @@ type conditionRecord struct {
 	Message   string
 }
 
-func valkeyAddrForHost(host string) string {
-	if host == isucon1Hostname || strings.HasPrefix(host, isucon1Hostname+".") {
-		return valkeyUnixSocketPath
-	}
-	// isucondition-1.t.isucon.dev は全台で 127.0.0.11 に向くため、isucon1 の hostname を使う。
-	return isucon1Hostname + ":6379"
-}
-
 func defaultValkeyAddr() string {
 	if addr := os.Getenv("VALKEY_ADDR"); addr != "" {
 		return addr
 	}
-	host, err := os.Hostname()
-	if err != nil {
-		return isucon1Hostname + ":6379"
-	}
-	return valkeyAddrForHost(host)
+	return valkeyUnixSocketPath
 }
 
 func valkeyClientOption(addr string) (valkey.ClientOption, error) {

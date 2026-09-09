@@ -173,15 +173,10 @@ func TestDefaultValkeyAddrUsesEnv(t *testing.T) {
 	}
 }
 
-func TestValkeyAddrForHost(t *testing.T) {
-	if got := valkeyAddrForHost(isucon1Hostname); got != valkeyUnixSocketPath {
-		t.Fatalf("isucon1 addr=%q", got)
-	}
-	if got := valkeyAddrForHost(isucon1Hostname + ".ap-northeast-1.compute.internal"); got != valkeyUnixSocketPath {
-		t.Fatalf("fqdn addr=%q", got)
-	}
-	if got := valkeyAddrForHost("ip-192-168-0-12"); got != isucon1Hostname+":6379" {
-		t.Fatalf("isucon2 addr=%q", got)
+func TestDefaultValkeyAddrUnix(t *testing.T) {
+	t.Setenv("VALKEY_ADDR", "")
+	if got := defaultValkeyAddr(); got != valkeyUnixSocketPath {
+		t.Fatalf("addr=%q", got)
 	}
 }
 
