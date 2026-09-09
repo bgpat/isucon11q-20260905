@@ -10,7 +10,8 @@ nginx 1.30.4 + OpenSSL 3.5.8 を `/opt/nginx-1.30.4` に用意する。
 
 ## 対象
 
-- `/usr/sbin/nginx` と共有の `/etc/nginx/` サイト設定は残す。
+- `/usr/sbin/nginx` と `/etc/nginx/` のサイト設定は残す（付属 1.18.0 用）。
+- 独自 1.30.4 は `/etc/nginx-custom/` の `nginx.conf` と `sites-enabled` を読む。
 - enable は `nginx-custom`、付属 `nginx.service` は disable。
 
 ## 前提条件
