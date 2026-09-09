@@ -203,6 +203,8 @@ func writeJSONBytes(c echo.Context, code int, body []byte) error {
 	if res.Header().Get(echo.HeaderContentType) == "" {
 		res.Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
 	}
+	// Content-Length を先に付けて HTTP/1.1 chunked を避け、nginx への write を1回に近づける。
+	res.Header().Set(echo.HeaderContentLength, strconv.Itoa(len(body)))
 	res.WriteHeader(code)
 	_, err := res.Write(body)
 	return err

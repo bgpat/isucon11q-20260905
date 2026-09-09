@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	stdjson "encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -156,8 +158,54 @@ func TestWritePrettyJSONMatchesEchoPretty(t *testing.T) {
 			if got, want := recFast.Header().Get(echo.HeaderContentType), recEcho.Header().Get(echo.HeaderContentType); got != want {
 				t.Fatalf("content-type echo=%q writePrettyJSON=%q", want, got)
 			}
+			// Echo の Debug JSON は Encoder で流すため Content-Length を付けない。
+			// writeJSONBytes はボディ確定後に長さを付ける。
+			if got, want := recFast.Header().Get(echo.HeaderContentLength), strconv.Itoa(recFast.Body.Len()); got != want {
+				t.Fatalf("content-length=%q want %q", got, want)
+			}
 			if !bytes.Equal(recEcho.Body.Bytes(), recFast.Body.Bytes()) {
 				t.Fatalf("body mismatch\necho: %s\nwritePrettyJSON: %s", recEcho.Body.Bytes(), recFast.Body.Bytes())
+			}
+		})
+	}
+}
+
+func TestWriteJSONBytesHTTP1ContentLength(t *testing.T) {
+	bodies := [][]byte{
+		[]byte("{\n  \"language\": \"go\"\n}\n"),
+		[]byte{},
+	}
+	for _, body := range bodies {
+		t.Run("len="+strconv.Itoa(len(body)), func(t *testing.T) {
+			e := echo.New()
+			payload := append([]byte(nil), body...)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := writeJSONBytes(e.NewContext(r, w), http.StatusOK, payload); err != nil {
+					t.Errorf("writeJSONBytes: %v", err)
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			resp, err := http.Get(srv.URL + "/")
+			if err != nil {
+				t.Fatalf("GET: %v", err)
+			}
+			defer resp.Body.Close()
+			got, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status=%d", resp.StatusCode)
+			}
+			if resp.ContentLength != int64(len(payload)) {
+				t.Fatalf("Content-Length=%d want %d encoding=%v", resp.ContentLength, len(payload), resp.TransferEncoding)
+			}
+			if len(resp.TransferEncoding) != 0 {
+				t.Fatalf("Transfer-Encoding=%v want empty", resp.TransferEncoding)
+			}
+			if !bytes.Equal(got, payload) {
+				t.Fatalf("body=%q want %q", got, payload)
 			}
 		})
 	}
