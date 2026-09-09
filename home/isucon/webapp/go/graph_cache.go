@@ -8,13 +8,6 @@ type graphCacheKey struct {
 	startUnix  int64
 }
 
-func graphCacheCurrentGen() uint64 {
-	graphCache.Lock()
-	g := graphCache.gen
-	graphCache.Unlock()
-	return g
-}
-
 func graphCacheGet(key graphCacheKey) ([]byte, bool) {
 	body, _, ok := graphCacheLookup(key)
 	return body, ok
@@ -79,9 +72,7 @@ func invalidateGraphCache() {
 	graphCache.Lock()
 	graphCache.entries = nil
 	graphCache.gen++
-	gen := graphCache.gen
 	graphCache.Unlock()
-	graphTraceInvalidateAll(gen)
 }
 
 func invalidateGraphCacheForConditions(jiaIsuUUID string, timestamps []time.Time) {
@@ -89,12 +80,11 @@ func invalidateGraphCacheForConditions(jiaIsuUUID string, timestamps []time.Time
 		return
 	}
 	graphCache.Lock()
+	defer graphCache.Unlock()
 	byStart, ok := graphCache.entries[jiaIsuUUID]
-	deletedWatchDay := false
 	if ok && len(byStart) > 0 {
 		// startUnix は getIsuGraph で hour truncate 済み。timestamp ts が
 		// [start, start+24h) に入る start は hour 境界で (ts-24h, ts] の最大 24 個。
-		_, hadWatchDay := byStart[graphTraceWatchDay]
 		seenHour := make(map[int64]struct{}, 8)
 		for _, ts := range timestamps {
 			hour := ts.Truncate(time.Hour).Unix()
@@ -104,11 +94,7 @@ func invalidateGraphCacheForConditions(jiaIsuUUID string, timestamps []time.Time
 			seenHour[hour] = struct{}{}
 			end := time.Unix(hour, 0)
 			for i := 0; i < 24; i++ {
-				startUnix := end.Add(-time.Duration(i) * time.Hour).Unix()
-				delete(byStart, startUnix)
-				if hadWatchDay && startUnix == graphTraceWatchDay {
-					deletedWatchDay = true
-				}
+				delete(byStart, end.Add(-time.Duration(i)*time.Hour).Unix())
 			}
 		}
 		if len(byStart) == 0 {
@@ -117,7 +103,4 @@ func invalidateGraphCacheForConditions(jiaIsuUUID string, timestamps []time.Time
 	}
 	// cache が空でも世代を進める。生成中の GET が POST 後に古い JSON を書かないため。
 	graphCache.gen++
-	gen := graphCache.gen
-	graphCache.Unlock()
-	graphTraceInvalidate(jiaIsuUUID, timestamps, deletedWatchDay, gen)
 }
