@@ -9,6 +9,10 @@ server:
   http_listen_port: 3200
 
 distributor:
+  ring:
+    instance_addr: __TEMPO_INSTANCE_ADDR__
+    kvstore:
+      store: memberlist
   receivers:
     otlp:
       protocols:
@@ -36,6 +40,16 @@ memberlist:
   advertise_addr: __TEMPO_INSTANCE_ADDR__
   join_members:
 __TEMPO_JOIN_MEMBERS__
+
+querier:
+  frontend_worker:
+    frontend_address: 127.0.0.1:9095
+
+compactor:
+  ring:
+    instance_addr: __TEMPO_INSTANCE_ADDR__
+    kvstore:
+      store: memberlist
 
 storage:
   trace:

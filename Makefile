@@ -237,7 +237,7 @@ grafana: /usr/local/bin/grafana
 tempo: /usr/local/bin/tempo /etc/tempo/config.yml
 	-pkill tempo || true
 	mkdir -p /tmp/tempo/wal /tmp/tempo/blocks /tmp/tempo
-	nohup tempo -target=all -config.file=/etc/tempo/config.yml >/tmp/tempo/tempo.log 2>&1 &
+	nohup tempo -target=scalable-single-binary -config.file=/etc/tempo/config.yml >/tmp/tempo/tempo.log 2>&1 &
 
 /usr/local/bin/tempo:
 	curl -sL https://github.com/grafana/tempo/releases/download/v2.6.1/tempo_2.6.1_linux_amd64.tar.gz | tar xzv -C /usr/local/bin tempo

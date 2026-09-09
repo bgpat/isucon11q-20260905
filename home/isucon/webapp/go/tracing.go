@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -20,9 +21,20 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const tracerName = "isucondition"
+const (
+	tracerScopeIsucondition = "isucondition"
+	serviceIsucondition     = "isucondition"
+	serviceMySQL            = "mysql"
+	serviceValkey           = "valkey"
+	serviceJiamock          = "jiamock"
+)
 
-var tracingActive bool
+var (
+	tracingActive        bool
+	mysqlTracerProvider  trace.TracerProvider
+	valkeyTracerProvider trace.TracerProvider
+	jiaTracerProvider    trace.TracerProvider
+)
 
 func tracingEnabled() bool {
 	return tracingActive
@@ -39,23 +51,58 @@ func initTracing() (func(context.Context) error, error) {
 		return nil, err
 	}
 	host, _ := os.Hostname()
+
+	appTP, err := newServiceTracerProvider(ctx, exp, serviceIsucondition, host)
+	if err != nil {
+		return nil, err
+	}
+	mysqlTP, err := newServiceTracerProvider(ctx, exp, serviceMySQL, host)
+	if err != nil {
+		return nil, err
+	}
+	valkeyTP, err := newServiceTracerProvider(ctx, exp, serviceValkey, host)
+	if err != nil {
+		return nil, err
+	}
+	jiaTP, err := newServiceTracerProvider(ctx, exp, serviceJiamock, host)
+	if err != nil {
+		return nil, err
+	}
+
+	otel.SetTracerProvider(appTP)
+	mysqlTracerProvider = mysqlTP
+	valkeyTracerProvider = valkeyTP
+	jiaTracerProvider = jiaTP
+	tracingActive = true
+
+	return func(ctx context.Context) error {
+		var lastErr error
+		for _, shutdown := range []func(context.Context) error{
+			appTP.Shutdown, mysqlTP.Shutdown, valkeyTP.Shutdown, jiaTP.Shutdown,
+		} {
+			if err := shutdown(ctx); err != nil {
+				lastErr = err
+			}
+		}
+		return lastErr
+	}, nil
+}
+
+func newServiceTracerProvider(ctx context.Context, exp sdktrace.SpanExporter, serviceName, host string) (*sdktrace.TracerProvider, error) {
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
-			semconv.ServiceName("isucondition"),
+			semconv.ServiceName(serviceName),
 			semconv.HostName(host),
 		),
 	)
 	if err != nil {
 		return nil, err
 	}
-	tp := sdktrace.NewTracerProvider(
+	return sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exp, sdktrace.WithBatchTimeout(time.Second)),
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 		sdktrace.WithResource(res),
-	)
-	otel.SetTracerProvider(tp)
-	tracingActive = true
-	return tp.Shutdown, nil
+	), nil
 }
 
 func echoTraceMiddleware() echo.MiddlewareFunc {
@@ -66,7 +113,7 @@ func echoTraceMiddleware() echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			req := c.Request()
 			route := c.Path()
-			ctx, span := otel.Tracer(tracerName).Start(req.Context(), req.Method+" "+route)
+			ctx, span := otel.Tracer(tracerScopeIsucondition).Start(req.Context(), req.Method+" "+route)
 			defer span.End()
 			span.SetAttributes(
 				semconv.HTTPRequestMethodKey.String(req.Method),
@@ -85,7 +132,10 @@ func echoTraceMiddleware() echo.MiddlewareFunc {
 }
 
 func openTracedSQL(dsn string) (*sql.DB, error) {
-	return otelsql.Open("mysql", dsn, otelsql.WithAttributes(semconv.DBSystemMySQL))
+	return otelsql.Open("mysql", dsn,
+		otelsql.WithTracerProvider(mysqlTracerProvider),
+		otelsql.WithAttributes(semconv.DBSystemMySQL),
+	)
 }
 
 type tracingValkeyClient struct {
@@ -100,7 +150,7 @@ func wrapValkeyClient(client valkey.Client) valkey.Client {
 }
 
 func (c *tracingValkeyClient) Do(ctx context.Context, cmd valkey.Completed) valkey.ValkeyResult {
-	ctx, span := otel.Tracer(tracerName).Start(ctx, "valkey.do")
+	ctx, span := valkeyTracerProvider.Tracer("valkey-go").Start(ctx, "valkey.do")
 	defer span.End()
 	res := c.Client.Do(ctx, cmd)
 	if err := res.Error(); err != nil {
@@ -111,7 +161,7 @@ func (c *tracingValkeyClient) Do(ctx context.Context, cmd valkey.Completed) valk
 }
 
 func (c *tracingValkeyClient) DoMulti(ctx context.Context, multi ...valkey.Completed) []valkey.ValkeyResult {
-	ctx, span := otel.Tracer(tracerName).Start(ctx, "valkey.do_multi")
+	ctx, span := valkeyTracerProvider.Tracer("valkey-go").Start(ctx, "valkey.do_multi")
 	span.SetAttributes(attribute.Int("valkey.command_count", len(multi)))
 	defer span.End()
 	resps := c.Client.DoMulti(ctx, multi...)
@@ -125,6 +175,30 @@ func (c *tracingValkeyClient) DoMulti(ctx context.Context, multi ...valkey.Compl
 	return resps
 }
 
+func doJIARequest(ctx context.Context, req *http.Request) (*http.Response, error) {
+	if !tracingEnabled() {
+		return http.DefaultClient.Do(req.WithContext(ctx))
+	}
+	ctx, span := jiaTracerProvider.Tracer("http").Start(ctx, req.Method+" "+req.URL.Path, trace.WithSpanKind(trace.SpanKindClient))
+	defer span.End()
+	span.SetAttributes(
+		semconv.HTTPRequestMethodKey.String(req.Method),
+		semconv.URLPath(req.URL.Path),
+		semconv.ServerAddress(req.URL.Hostname()),
+	)
+	res, err := http.DefaultClient.Do(req.WithContext(ctx))
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return res, err
+	}
+	span.SetAttributes(semconv.HTTPResponseStatusCodeKey.Int(res.StatusCode))
+	if res.StatusCode >= 400 {
+		span.SetStatus(codes.Error, res.Status)
+	}
+	return res, nil
+}
+
 func traceLock(ctx context.Context, name string, mu *sync.Mutex) (context.Context, func()) {
 	if !tracingEnabled() {
 		mu.Lock()
@@ -133,7 +207,7 @@ func traceLock(ctx context.Context, name string, mu *sync.Mutex) (context.Contex
 	waitStart := time.Now()
 	mu.Lock()
 	wait := time.Since(waitStart)
-	ctx, span := otel.Tracer(tracerName).Start(ctx, "lock "+name)
+	ctx, span := otel.Tracer(tracerScopeIsucondition).Start(ctx, "lock "+name)
 	span.SetAttributes(attribute.Int64("lock.wait_ms", wait.Milliseconds()))
 	return ctx, func() {
 		span.End()
