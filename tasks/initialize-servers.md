@@ -236,3 +236,11 @@ done
 - 同期後の commit: `70d7250`。3台とも working tree clean、root で SSH 可能
 - sudoers / sshd_config は初回と同様 Git 未追跡のまま
 - 関連: #305 #341。初期データは再取得せず Release `db-initial-20260906-0343`（#9）を使う
+
+## 2026-09-10 ベンチマーカの役割修正（#379）
+
+- #371 は `54.92.69.228`（`ip-192-168-0-10`）を isucon3 として初期化した
+- ポータル出力ではこのホストはベンチマーカ。isucon3 は `13.113.66.178`（`ip-192-168-0-13`）
+- ベンチマーカ上の `isucondition.go` と `nginx-custom` を disable した。`jiaapi-mock` は残す
+- 監視プロセスは再起動で止める。Prometheus `hosts.json` から `192.168.0.10` を外す
+- 関連: #371 #377 #379
