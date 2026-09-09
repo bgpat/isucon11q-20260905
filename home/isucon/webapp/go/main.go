@@ -36,18 +36,20 @@ import (
 )
 
 const (
-	sessionName                 = "isucondition_go"
-	conditionLimit              = 20
-	frontendContentsPath        = "../public"
-	jiaJWTSigningKeyPath        = "../ec256-public.pem"
-	defaultIconFilePath         = "../NoImage.jpg"
-	isuIconCacheDir             = "/home/isucon/webapp/public/.isucondition-icon-cache"
-	isuIconInternalPath         = "/_isucondition_icon_cache/"
-	defaultJIAServiceURL        = "http://localhost:5000"
-	mysqlErrNumDuplicateEntry   = 1062
-	sessionCacheTTL             = 30 * time.Second
-	sessionCacheMaxEntries      = 10000
-	dropConditionLogIdle        = 10 * time.Second
+	sessionName               = "isucondition_go"
+	conditionLimit            = 20
+	frontendContentsPath      = "../public"
+	jiaJWTSigningKeyPath      = "../ec256-public.pem"
+	defaultIconFilePath       = "../NoImage.jpg"
+	isuIconCacheDir           = "/home/isucon/webapp/public/.isucondition-icon-cache"
+	isuIconInternalPath       = "/_isucondition_icon_cache/"
+	defaultJIAServiceURL      = "http://localhost:5000"
+	mysqlErrNumDuplicateEntry = 1062
+	sessionCacheTTL           = 30 * time.Second
+	sessionCacheMaxEntries    = 10000
+	dropConditionLogIdle      = 10 * time.Second
+	benchLoadDuration         = 60 * time.Second
+	accessLogFlushDelay       = benchLoadDuration + dropConditionLogIdle
 	// #165: 10% 刻み二分探索。最初の2点は端の 0% と中点の 40%。
 	dropConditionProbability    = 0.0
 	conditionLevelInfo          = "info"
@@ -69,6 +71,8 @@ var (
 	trendCache                    struct {
 		sync.RWMutex
 		response []TrendResponse
+		body     []byte
+		locs     map[int]trendJSONLoc
 		valid    bool
 		gen      uint64
 	}
@@ -80,6 +84,7 @@ var (
 	dropConditionPending uint64
 	dropConditionTotal   uint64
 	dropConditionLogger  echo.Logger
+	accessLogWriter      *deferredLogWriter
 	prettyJSONBufPool    = sync.Pool{
 		New: func() interface{} {
 			return new(bytes.Buffer)
@@ -91,6 +96,7 @@ var (
 	iconFileCache sync.Map
 	graphCache    struct {
 		sync.Mutex
+		gen uint64
 		// jiaIsuUUID -> startUnix -> jiaUserID -> body
 		entries map[string]map[int64]map[string][]byte
 	}
@@ -100,19 +106,24 @@ func rememberIsuUUID(jiaIsuUUID string) {
 	isuUUIDCache.Store(jiaIsuUUID, struct{}{})
 }
 
+func forgetIsuUUID(jiaIsuUUID string) {
+	isuUUIDCache.Delete(jiaIsuUUID)
+}
+
+// abortUnactivatedIsu は activate 失敗時に、先に commit した isu 行とキャッシュを取り消す。
+func abortUnactivatedIsu(c echo.Context, jiaIsuUUID string) {
+	forgetIsuUUID(jiaIsuUUID)
+	forgetIsuMeta(jiaIsuUUID)
+	if _, err := db.Exec("DELETE FROM `isu` WHERE `jia_isu_uuid` = ?", jiaIsuUUID); err != nil {
+		c.Logger().Errorf("failed to delete unactivated isu %s: %v", jiaIsuUUID, err)
+	}
+}
+
 func invalidateIsuUUIDCache() {
 	isuUUIDCache.Range(func(key, _ interface{}) bool {
 		isuUUIDCache.Delete(key)
 		return true
 	})
-}
-
-func buildIsuConditionInsertValues(n int) string {
-	placeholders := make([]string, n)
-	for i := 0; i < n; i++ {
-		placeholders[i] = "(?, ?, ?, ?, ?)"
-	}
-	return strings.Join(placeholders, ",")
 }
 
 type sessionCacheEntry struct {
@@ -480,7 +491,10 @@ func main() {
 	dropConditionLogger = e.Logger
 	startDropConditionLogFlusher()
 
-	e.Use(middleware.Logger())
+	accessLogWriter = newDeferredLogWriter(os.Stdout)
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+		Output: accessLogWriter,
+	}))
 	e.Use(middleware.Recover())
 	if getEnv("ENABLE_PPROF", "0") == "1" {
 		e.GET("/debug/pprof/*", echo.WrapHandler(http.DefaultServeMux))
@@ -605,6 +619,10 @@ func getJIAServiceURL(db *sqlx.DB) string {
 // POST /initialize
 // サービスを初期化
 func postInitialize(c echo.Context) error {
+	if accessLogWriter != nil {
+		accessLogWriter.startBuffering(accessLogFlushDelay)
+	}
+
 	var request InitializeRequest
 	err := c.Bind(&request)
 	if err != nil {
@@ -898,12 +916,14 @@ func postIsu(c echo.Context) error {
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	reqJIA, err := http.NewRequest(http.MethodPost, targetURL, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -911,6 +931,7 @@ func postIsu(c echo.Context) error {
 	res, err := http.DefaultClient.Do(reqJIA)
 	if err != nil {
 		c.Logger().Errorf("failed to request to JIAService: %v", err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	defer res.Body.Close()
@@ -918,11 +939,13 @@ func postIsu(c echo.Context) error {
 	resBody, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	if res.StatusCode != http.StatusAccepted {
 		c.Logger().Errorf("JIAService returned error: status code %v, message: %v", res.StatusCode, string(resBody))
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.String(res.StatusCode, "JIAService returned error")
 	}
 
@@ -930,12 +953,14 @@ func postIsu(c echo.Context) error {
 	err = json.Unmarshal(resBody, &isuFromJIA)
 	if err != nil {
 		c.Logger().Error(err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	_, err = tx.Exec("UPDATE `isu` SET `character` = ? WHERE  `jia_isu_uuid` = ?", isuFromJIA.Character, jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
+		abortUnactivatedIsu(c, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	if err = tx.Commit(); err != nil {
@@ -963,7 +988,6 @@ func postIsu(c echo.Context) error {
 	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
 		c.Logger().Errorf("failed to cache icon: %v", err)
 	}
-	invalidateTrendCache()
 
 	return writeJSON(c, http.StatusCreated, isu)
 }
@@ -1064,11 +1088,12 @@ func getIsuGraph(c echo.Context) error {
 	}
 	date := time.Unix(datetimeInt64, 0).Truncate(time.Hour)
 	cacheKey := graphCacheKey{jiaUserID: jiaUserID, jiaIsuUUID: jiaIsuUUID, startUnix: date.Unix()}
-	if body, ok := graphCacheGet(cacheKey); ok {
+	body, seenGen, ok := graphCacheLookup(cacheKey)
+	if ok {
 		return writeJSONBytes(c, http.StatusOK, body)
 	}
 
-	_, ok, err := ownedIsuMeta(jiaIsuUUID, jiaUserID)
+	_, ok, err = ownedIsuMeta(jiaIsuUUID, jiaUserID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1083,11 +1108,11 @@ func getIsuGraph(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	body, err := marshalPrettyJSON(res)
+	body, err = marshalPrettyJSON(res)
 	if err != nil {
 		return err
 	}
-	graphCacheSet(cacheKey, body)
+	graphCacheSetIfGen(cacheKey, body, seenGen)
 	return writeJSONBytes(c, http.StatusOK, body)
 }
 
@@ -1490,21 +1515,26 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
-	if res, ok := loadTrendCache(); ok {
-		return writeJSON(c, http.StatusOK, res)
+	if body, ok := loadTrendJSONIfUsable(); ok {
+		return writeJSONBytes(c, http.StatusOK, body)
 	}
 
 	// 再計算は trendComputeMu だけ直列化する。trendCache は持たないので
-	// POST /api/condition の invalidate は待たない。
+	// POST /api/condition の markTrendCacheDirty は待たない。
 	trendComputeMu.Lock()
 	defer trendComputeMu.Unlock()
-	gen, res, hit := snapshotTrendCache()
-	if hit {
-		return writeJSON(c, http.StatusOK, res)
+	if body, ok := loadTrendJSONIfUsable(); ok {
+		return writeJSONBytes(c, http.StatusOK, body)
 	}
+	if body, ok := refreshTrendJSONFromMemory(); ok {
+		return writeJSONBytes(c, http.StatusOK, body)
+	}
+	gen, _, _ := snapshotTrendCache()
 
+	// postIsu は character 無しで INSERT してから JIA activate する。
+	// その間の trend 再計算が NULL を Scan しないよう除外する。
 	characterList := []Isu{}
-	err := db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
+	err := db.Select(&characterList, "SELECT `character` FROM `isu` WHERE `character` IS NOT NULL GROUP BY `character`")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1515,7 +1545,7 @@ func getTrend(c echo.Context) error {
 		JIAIsuUUID string `db:"jia_isu_uuid"`
 		Character  string `db:"character"`
 	}{}
-	err = db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu`")
+	err = db.Select(&isuRows, "SELECT `id`, `jia_isu_uuid`, `character` FROM `isu` WHERE `character` IS NOT NULL")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1585,7 +1615,7 @@ func getTrend(c echo.Context) error {
 		}
 	}
 
-	res = make([]TrendResponse, 0, len(characterList))
+	res := make([]TrendResponse, 0, len(characterList))
 	for _, character := range characterList {
 		res = append(res, TrendResponse{
 			Character: character.Character,
@@ -1595,6 +1625,9 @@ func getTrend(c echo.Context) error {
 		})
 	}
 	storeTrendCache(gen, res)
+	if body, ok := loadTrendJSONIfUsable(); ok {
+		return writeJSONBytes(c, http.StatusOK, body)
+	}
 	return writeJSON(c, http.StatusOK, res)
 }
 
@@ -1634,72 +1667,6 @@ func startDropConditionLogFlusher() {
 
 // POST /api/condition/:jia_isu_uuid
 // ISUからのコンディションを受け取る
-func postIsuConditionLegacy(c echo.Context) error {
-	// TODO: 一定割合リクエストを落としてしのぐようにしたが、本来は全量さばけるようにすべき
-	if rand.Float64() <= dropConditionProbability {
-		noteDroppedIsuCondition()
-		return c.NoContent(http.StatusAccepted)
-	}
-
-	jiaIsuUUID := c.Param("jia_isu_uuid")
-	if jiaIsuUUID == "" {
-		return c.String(http.StatusBadRequest, "missing: jia_isu_uuid")
-	}
-
-	req := []PostIsuConditionRequest{}
-	err := c.Bind(&req)
-	if err != nil {
-		return c.String(http.StatusBadRequest, "bad request body")
-	} else if len(req) == 0 {
-		return c.String(http.StatusBadRequest, "bad request body")
-	}
-
-	tx, err := db.Beginx()
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	defer tx.Rollback()
-
-	var count int
-	err = tx.Get(&count, "SELECT COUNT(*) FROM `isu` WHERE `jia_isu_uuid` = ?", jiaIsuUUID)
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	if count == 0 {
-		return c.String(http.StatusNotFound, "not found: isu")
-	}
-
-	for _, cond := range req {
-		timestamp := time.Unix(cond.Timestamp, 0)
-
-		if !isValidConditionFormat(cond.Condition) {
-			return c.String(http.StatusBadRequest, "bad request body")
-		}
-
-		_, err = tx.Exec(
-			"INSERT INTO `isu_condition`"+
-				"	(`jia_isu_uuid`, `timestamp`, `is_sitting`, `condition`, `message`)"+
-				"	VALUES (?, ?, ?, ?, ?)",
-			jiaIsuUUID, timestamp, cond.IsSitting, cond.Condition, cond.Message)
-		if err != nil {
-			c.Logger().Errorf("db error: %v", err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	invalidateTrendCache()
-
-	return c.NoContent(http.StatusAccepted)
-}
-
 func postIsuCondition(c echo.Context) error {
 	if rand.Float64() <= dropConditionProbability {
 		noteDroppedIsuCondition()
@@ -1710,27 +1677,9 @@ func postIsuCondition(c echo.Context) error {
 	if jiaIsuUUID == "" {
 		return c.String(http.StatusBadRequest, "missing: jia_isu_uuid")
 	}
-	req := make([]PostIsuConditionRequest, 0, postIsuConditionBindCap)
-	if err := c.Bind(&req); err != nil {
+	records, timestamps, err := readPostIsuConditionRecords(c.Request().Body)
+	if err != nil || len(records) == 0 {
 		return c.String(http.StatusBadRequest, "bad request body")
-	} else if len(req) == 0 {
-		return c.String(http.StatusBadRequest, "bad request body")
-	}
-
-	records := make([]conditionRecord, 0, len(req))
-	timestamps := make([]time.Time, 0, len(req))
-	for _, cond := range req {
-		if !isValidConditionFormat(cond.Condition) {
-			return c.String(http.StatusBadRequest, "bad request body")
-		}
-		ts := time.Unix(cond.Timestamp, 0)
-		records = append(records, conditionRecord{
-			Timestamp: ts,
-			IsSitting: cond.IsSitting,
-			Condition: cond.Condition,
-			Message:   cond.Message,
-		})
-		timestamps = append(timestamps, ts)
 	}
 
 	// 正の uuid / メタデータキャッシュに無ければ 1 回だけ確認する。404 はキャッシュしない。
@@ -1749,7 +1698,13 @@ func postIsuCondition(c echo.Context) error {
 		c.Logger().Errorf("valkey error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	invalidateTrendCache()
+	latest := records[0]
+	for _, rec := range records[1:] {
+		if !rec.Timestamp.Before(latest.Timestamp) {
+			latest = rec
+		}
+	}
+	applyTrendLatest(jiaIsuUUID, latest)
 	invalidateGraphCacheForConditions(jiaIsuUUID, timestamps)
 	return c.NoContent(http.StatusAccepted)
 }
