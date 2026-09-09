@@ -1,7 +1,7 @@
 # Tempo 分散クラスタ（#366）。全競技サーバーが同一構成で参加する。
 # - distributor: OTLP 127.0.0.1:4318
 # - ingester + querier + query-frontend: ローカル storage、ring 経由で全ノードを横断 query
-# /ops/render-tempo-config.sh がプレースホルダ行を置換する。
+# /ops/render-tempo-config.sh が /files/hosts/* から IP を読んでプレースホルダ行を置換する。
 stream_over_http_enabled: true
 
 server:
