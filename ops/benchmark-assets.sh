@@ -123,7 +123,7 @@ archive() {
 		exit 1
 	fi
 
-	files='bench.log db-before.txt db-after.txt cpu.pprof slow.log.gz access.log.gz error.log journal.log prometheus-db.json prometheus-cpu.json'
+	files='bench.log db-before.txt db-after.txt cpu.pprof slow.log.gz access.log.gz error.log journal.log prometheus-db.json prometheus-cpu.json valkey-before.txt valkey-after.txt'
 	set --
 	for file in $files; do
 		if [ -e "$current_dir/$file" ]; then
