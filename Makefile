@@ -125,7 +125,7 @@ endif
 	-git commit -m 'Add host'
 
 .PHONY: monitoring
-monitoring: prometheus node_exporter process-exporter grafana-server
+monitoring: prometheus node_exporter process-exporter grafana
 
 .PHONY: deploy
 deploy:
@@ -141,14 +141,12 @@ deploy-app:
 	test -f /home/isucon/webapp/go/go.mod
 	runuser -u isucon -- sh -c 'cd /home/isucon/webapp/go && /home/isucon/local/go/bin/go build -buildvcs=false -o isucondition .'
 	systemctl daemon-reload
-	@if [ "$$(hostname -s 2>/dev/null || hostname)" = "ip-192-168-0-11" ]; then \
+	@if [ -x /usr/local/bin/valkey-server ]; then \
 		priv=$$(hostname -I | awk '{print $$1}'); \
 		sed -i -E "s/^bind .*/bind 127.0.0.1 $${priv}/" /etc/valkey/valkey.conf; \
 		systemctl enable valkey.service; \
 		systemctl restart valkey.service; \
 		systemctl is-active --quiet valkey.service; \
-	else \
-		systemctl disable --now valkey.service; \
 	fi
 	systemctl restart isucondition.go.service
 	systemctl is-active --quiet isucondition.go.service
@@ -163,6 +161,11 @@ upgrade-go:
 install-valkey:
 	test "$$(id -u)" -eq 0
 	/ops/install-valkey.sh
+
+.PHONY: install-nginx-custom
+install-nginx-custom:
+	test "$$(id -u)" -eq 0
+	/ops/install-nginx-custom.sh
 
 # Override LOG_FILES with paths confirmed on the target server. Do not add
 # unconfirmed server-specific paths here.
@@ -215,16 +218,16 @@ process-exporter: /usr/local/bin/process-exporter /etc/process-exporter/all.yaml
 /etc/process-exporter:
 	mkdir -p $@
 
-.PHONY: grafana-server
-grafana-server: /usr/local/bin/grafana-server
+.PHONY: grafana
+grafana: /usr/local/bin/grafana
 	-pkill $@
-	GF_SERVER_HTTP_PORT=3999 GF_AUTH_ANONYMOUS_ENABLED=true GF_AUTH_ANONYMOUS_ORG_ROLE=Admin nohup $@ -homepath /opt/grafana &
+	GF_SERVER_HTTP_PORT=3999 GF_AUTH_ANONYMOUS_ENABLED=true GF_AUTH_ANONYMOUS_ORG_ROLE=Admin nohup $@ server -homepath /opt/grafana &
 
-/usr/local/bin/grafana-server: /opt/grafana
-	ln -sf $</bin/grafana-server $@
+/usr/local/bin/grafana: /opt/grafana
+	ln -sf $</bin/grafana $@
 
 /opt/grafana:
 	mkdir -p $@
-	curl -sL https://dl.grafana.com/oss/release/grafana-7.1.5.linux-amd64.tar.gz | tar xzv --strip-components 1 -C $@
+	curl -sL https://dl.grafana.com/oss/release/grafana-13.2.1.linux-amd64.tar.gz | tar xzv --strip-components 1 -C $@
 	cp -f /files/grafana/datasources.yml $@/conf/provisioning/datasources/datasources.yml
 	cp -f /files/grafana/dashboards.yml $@/conf/provisioning/dashboards/dashboards.yml

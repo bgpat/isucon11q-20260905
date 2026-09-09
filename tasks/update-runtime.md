@@ -106,6 +106,7 @@ ssh s1 'go version'
 
 # 作業後の記録
 
-- 実行日時:
-- 言語と版:
-- 更新の有無:
+- 実行日時: 2026-09-06（#38）。インスタンス作り直し後の再導入は 2026-09-08（#305）
+- 言語と版: Go 1.27.1（`/home/isucon/local/go`、`/home/isucon/local/go/bin/go version`）
+- 更新の有無: 公式 linux-amd64 配布物を SHA-256 検証して導入。手順は `ops/install-go.sh` / `make upgrade-go`
+- 再導入後も 3台とも go1.27.1。関連: #38 #305 #341

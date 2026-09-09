@@ -27,6 +27,10 @@
 !/etc/systemd/system
 /etc/systemd/system/*
 !/etc/systemd/system/isucondition.go.service
+!/etc/systemd/system/nginx-custom.service
+!/etc/systemd/system/multi-user.target.wants
+/etc/systemd/system/multi-user.target.wants/*
+!/etc/systemd/system/multi-user.target.wants/nginx-custom.service
 # MariaDB 11.4 更新の原本
 !/etc/mysql
 /etc/mysql/*
@@ -39,3 +43,40 @@
 !/ops/benchmark-report.py
 !/ops/benchmark_sql.py
 !/ops/test_benchmark_report.py
+!/ops/install-nginx-custom.sh
+# /home/isucon/.bashrc.backup
+/*
+!/home
+/home/*
+!/home/isucon
+/home/isucon/*
+!/home/isucon/.bashrc.backup
+
+# /etc/sudoers
+/*
+!/etc
+/etc/*
+!/etc/sudoers
+
+# /etc/mysql/my.cnf
+/*
+!/etc
+/etc/*
+!/etc/mysql
+/etc/mysql/*
+!/etc/mysql/my.cnf
+
+# /etc/nginx-custom
+/*
+!/etc
+/etc/*
+!/etc/nginx-custom
+/etc/nginx-custom/*
+!/etc/nginx-custom/nginx.conf
+!/etc/nginx-custom/sites-available
+/etc/nginx-custom/sites-available/*
+!/etc/nginx-custom/sites-available/isucondition.conf
+!/etc/nginx-custom/sites-enabled
+/etc/nginx-custom/sites-enabled/*
+!/etc/nginx-custom/sites-enabled/isucondition.conf
+
