@@ -129,6 +129,12 @@ func upsertTrendLocked(meta isuMeta, ts int64, level string) (structureChanged b
 	ch := &trendCache.response[idx]
 	ensureTrendSlices(ch)
 	oldLevel, oldIdx, found := findTrendItem(ch, meta.ID)
+	if found {
+		oldTs := (*trendSlice(ch, oldLevel))[oldIdx].Timestamp
+		if ts < oldTs {
+			return false
+		}
+	}
 	if found && oldLevel == level {
 		s := trendSlice(ch, level)
 		if trendStillSorted(*s, oldIdx, ts, meta.ID) {
@@ -151,9 +157,31 @@ func upsertTrendLocked(meta isuMeta, ts int64, level string) (structureChanged b
 	return true
 }
 
-func patchTrendTimestampLocked(id int, ts int64, level string) bool {
+func queueTrendTimestampLocked(id int, ts int64, level string) bool {
 	loc, ok := trendCache.locs[id]
 	if !ok || loc.level != level || loc.tsLen == 0 {
+		return false
+	}
+	if ts <= loc.ts {
+		return true
+	}
+	if prev, ok := trendCache.pendingTs[id]; ok && ts <= prev {
+		return true
+	}
+	digits := strconv.FormatInt(ts, 10)
+	if len(digits) != loc.tsLen {
+		return false
+	}
+	if trendCache.pendingTs == nil {
+		trendCache.pendingTs = make(map[int]int64, 1)
+	}
+	trendCache.pendingTs[id] = ts
+	return true
+}
+
+func patchTrendTimestampBytes(body []byte, id int, ts int64) bool {
+	loc, ok := trendCache.locs[id]
+	if !ok || loc.tsLen == 0 {
 		return false
 	}
 	if ts < loc.ts {
@@ -163,15 +191,31 @@ func patchTrendTimestampLocked(id int, ts int64, level string) bool {
 	if len(digits) != loc.tsLen {
 		return false
 	}
-	if loc.tsOff < 0 || loc.tsOff+loc.tsLen > len(trendCache.body) {
+	if loc.tsOff < 0 || loc.tsOff+loc.tsLen > len(body) {
+		return false
+	}
+	copy(body[loc.tsOff:loc.tsOff+loc.tsLen], digits)
+	loc.ts = ts
+	trendCache.locs[id] = loc
+	return true
+}
+
+func applyPendingTimestampsLocked() bool {
+	if len(trendCache.pendingTs) == 0 {
+		return true
+	}
+	if len(trendCache.body) == 0 {
 		return false
 	}
 	body := make([]byte, len(trendCache.body))
 	copy(body, trendCache.body)
-	copy(body[loc.tsOff:loc.tsOff+loc.tsLen], digits)
-	loc.ts = ts
-	trendCache.locs[id] = loc
+	for id, ts := range trendCache.pendingTs {
+		if !patchTrendTimestampBytes(body, id, ts) {
+			return false
+		}
+	}
 	trendCache.body = body
+	clearTrendPendingLocked()
 	return true
 }
 
@@ -193,7 +237,7 @@ func applyTrendLatest(jiaIsuUUID string, rec conditionRecord) {
 		return
 	}
 	changed := upsertTrendLocked(meta, ts, level)
-	if !changed && patchTrendTimestampLocked(meta.ID, ts, level) {
+	if !changed && !trendDirty.Load() && queueTrendTimestampLocked(meta.ID, ts, level) {
 		return
 	}
 	trendDirty.Store(true)
