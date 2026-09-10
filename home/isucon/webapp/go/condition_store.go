@@ -25,21 +25,6 @@ const (
 	flagDirty                = 1 << 1
 	flagOverweight           = 1 << 2
 	flagBroken               = 1 << 3
-	valkeyLatestUpdateLua    = `
-local cur = redis.call('GET', KEYS[1])
-local newts = tonumber(ARGV[1])
-if not cur then
-  redis.call('SET', KEYS[1], ARGV[2])
-  return 1
-end
-local sep = string.char(30)
-local oldts = tonumber(string.match(cur, '^(%d+)' .. sep))
-if not oldts or newts >= oldts then
-  redis.call('SET', KEYS[1], ARGV[2])
-  return 1
-end
-return 0
-`
 )
 
 var (
@@ -197,7 +182,7 @@ func insertIsuConditionsToValkey(ctx context.Context, jiaIsuUUID string, records
 			latest = &cp
 		}
 	}
-	cmds = append(cmds, valkeyClient.B().Eval().Script(valkeyLatestUpdateLua).Numkeys(1).Key(conditionLatestKey(jiaIsuUUID)).Arg(strconv.FormatInt(latest.Timestamp.Unix(), 10)).Arg(encodeConditionLatest(*latest)).Build())
+	cmds = append(cmds, valkeyClient.B().Set().Key(conditionLatestKey(jiaIsuUUID)).Value(encodeConditionLatest(*latest)).Build())
 	for _, resp := range valkeyClient.DoMulti(ctx, cmds...) {
 		if err := resp.Error(); err != nil {
 			return err
