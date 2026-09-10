@@ -7,8 +7,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
-	"encoding/json/jsontext"
-	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -85,11 +83,6 @@ var (
 	dropConditionTotal   uint64
 	dropConditionLogger  echo.Logger
 	accessLogWriter      *deferredLogWriter
-	prettyJSONBufPool    = sync.Pool{
-		New: func() interface{} {
-			return new(bytes.Buffer)
-		},
-	}
 	// 存在する jia_isu_uuid だけを持つ正のキャッシュ。未ヒット（404）は載せない。
 	isuUUIDCache sync.Map
 	// ディスクに書いたアイコンの正のキャッシュ。未ヒットは載せない。
@@ -189,29 +182,20 @@ func invalidateSessionCache() {
 	sessionCache.Unlock()
 }
 
-// writeJSON は Echo 4.3.0 が e.Debug=true のとき c.JSON で出す pretty JSON と
-// 同じバイト列を書く。json.Encoder.SetIndent の compact marshal + Indent 再パースを避け、
-// json/v2 で 2 スペース indent を1パスで出す。末尾改行は Encoder.Encode に合わせる。
-func writeJSON(c echo.Context, code int, v interface{}) error {
-	body, err := marshalPrettyJSON(v)
-	if err != nil {
-		return err
-	}
-	return writeJSONBytes(c, code, body)
+// writePrettyJSON は Echo 4.3.0 が e.Debug=true のとき c.JSON で出す pretty JSON と
+// 同じバイト列を書く。応答型は reflection なしで pretty を直接書く。
+// 末尾改行は Encoder.Encode に合わせる。
+func writePrettyJSON[T any](c echo.Context, code int, v T, capHint int, enc func([]byte, T) []byte) error {
+	p := getPrettyJSONBuf()
+	body := append(enc(growBytes(*p, capHint), v), '\n')
+	return finishPrettyJSONWrite(c, code, p, body)
 }
 
-func marshalPrettyJSON(v interface{}) ([]byte, error) {
-	buf := prettyJSONBufPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	defer prettyJSONBufPool.Put(buf)
-
-	if err := jsonv2.MarshalWrite(buf, v, json.DefaultOptionsV1(), jsontext.WithIndent("  ")); err != nil {
-		return nil, err
-	}
-	buf.WriteByte('\n')
-	out := make([]byte, buf.Len())
-	copy(out, buf.Bytes())
-	return out, nil
+func finishPrettyJSONWrite(c echo.Context, code int, p *[]byte, body []byte) error {
+	err := writeJSONBytes(c, code, body)
+	*p = body
+	putPrettyJSONBuf(p)
+	return err
 }
 
 func writeJSONBytes(c echo.Context, code int, body []byte) error {
@@ -675,9 +659,9 @@ func postInitialize(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	return writeJSON(c, http.StatusOK, InitializeResponse{
+	return writePrettyJSON(c, http.StatusOK, InitializeResponse{
 		Language: "go",
-	})
+	}, 256, appendPrettyInitialize)
 }
 
 // POST /api/auth
@@ -783,7 +767,7 @@ func getMe(c echo.Context) error {
 	}
 
 	res := GetMeResponse{JIAUserID: jiaUserID}
-	return writeJSON(c, http.StatusOK, res)
+	return writePrettyJSON(c, http.StatusOK, res, 256, appendPrettyMe)
 }
 
 // GET /api/isu
@@ -845,7 +829,7 @@ func getIsuList(c echo.Context) error {
 		})
 	}
 
-	return writeJSON(c, http.StatusOK, responseList)
+	return writePrettyJSON(c, http.StatusOK, responseList, prettyIsuListCap(responseList), appendPrettyIsuList)
 }
 
 // POST /api/isu
@@ -1005,7 +989,7 @@ func postIsu(c echo.Context) error {
 		c.Logger().Errorf("failed to cache icon: %v", err)
 	}
 
-	return writeJSON(c, http.StatusCreated, isu)
+	return writePrettyJSON(c, http.StatusCreated, isu, 256, appendPrettyIsu)
 }
 
 // GET /api/isu/:jia_isu_uuid
@@ -1032,12 +1016,12 @@ func getIsuID(c echo.Context) error {
 		return c.String(http.StatusNotFound, "not found: isu")
 	}
 
-	return writeJSON(c, http.StatusOK, Isu{
+	return writePrettyJSON(c, http.StatusOK, Isu{
 		ID:         meta.ID,
 		JIAIsuUUID: meta.JIAIsuUUID,
 		Name:       meta.Name,
 		Character:  meta.Character,
-	})
+	}, 256, appendPrettyIsu)
 }
 
 // GET /api/isu/:jia_isu_uuid/icon
@@ -1124,10 +1108,7 @@ func getIsuGraph(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	body, err = marshalPrettyJSON(res)
-	if err != nil {
-		return err
-	}
+	body = marshalPrettyGraph(res)
 	graphCacheSetIfGen(cacheKey, body, seenGen)
 	return writeJSONBytes(c, http.StatusOK, body)
 }
@@ -1345,7 +1326,7 @@ func getIsuConditions(c echo.Context) error {
 		c.Logger().Errorf("valkey error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	return writeJSON(c, http.StatusOK, conditionsResponse)
+	return writePrettyJSON(c, http.StatusOK, conditionsResponse, prettyConditionCap(conditionsResponse), appendPrettyConditionList)
 }
 
 // ISUのコンディションをDBから取得
@@ -1658,7 +1639,7 @@ func getTrend(c echo.Context) error {
 	if body, ok := loadTrendJSONIfUsable(); ok {
 		return writeJSONBytes(c, http.StatusOK, body)
 	}
-	return writeJSON(c, http.StatusOK, res)
+	return writePrettyJSON(c, http.StatusOK, res, prettyTrendCap(res), appendPrettyTrendList)
 }
 
 func noteDroppedIsuCondition() {
