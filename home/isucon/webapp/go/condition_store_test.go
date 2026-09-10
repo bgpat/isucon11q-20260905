@@ -173,10 +173,39 @@ func TestDefaultValkeyAddrUsesEnv(t *testing.T) {
 	}
 }
 
-func TestDefaultValkeyAddrLocalhost(t *testing.T) {
+func TestDefaultValkeyAddrUnix(t *testing.T) {
 	t.Setenv("VALKEY_ADDR", "")
-	if got := defaultValkeyAddr(); got != "127.0.0.1:6379" {
+	if got := defaultValkeyAddr(); got != valkeyUnixSocketPath {
 		t.Fatalf("addr=%q", got)
+	}
+}
+
+func TestValkeyClientOptionUnix(t *testing.T) {
+	opt, err := valkeyClientOption(valkeyUnixSocketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opt.DialCtxFn == nil {
+		t.Fatal("unix socket needs DialCtxFn")
+	}
+	if len(opt.InitAddress) != 1 || opt.InitAddress[0] != valkeyUnixSocketPath {
+		t.Fatalf("InitAddress=%v", opt.InitAddress)
+	}
+	if !opt.DisableCache {
+		t.Fatal("DisableCache")
+	}
+}
+
+func TestValkeyClientOptionTCP(t *testing.T) {
+	opt, err := valkeyClientOption("127.0.0.1:6379")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opt.DialCtxFn != nil {
+		t.Fatal("tcp should not set DialCtxFn")
+	}
+	if len(opt.InitAddress) != 1 || opt.InitAddress[0] != "127.0.0.1:6379" {
+		t.Fatalf("InitAddress=%v", opt.InitAddress)
 	}
 }
 

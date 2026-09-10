@@ -17,6 +17,7 @@ const (
 	conditionZKeyPrefix      = "cond:z:"
 	conditionLatestKeyPrefix = "cond:latest:"
 	conditionKeyScanMatch    = "cond:*"
+	valkeyUnixSocketPath     = "/run/valkey/valkey.sock"
 	conditionListFetchFactor = 8
 	conditionListFetchMin    = 64
 	conditionMemberVer1      = 1
@@ -68,14 +69,33 @@ func defaultValkeyAddr() string {
 	if addr := os.Getenv("VALKEY_ADDR"); addr != "" {
 		return addr
 	}
-	return "localhost:6379"
+	return valkeyUnixSocketPath
+}
+
+func valkeyClientOption(addr string) (valkey.ClientOption, error) {
+	if strings.HasPrefix(addr, "/") {
+		addr = "unix://" + addr
+	}
+	if strings.HasPrefix(addr, "unix://") {
+		opt, err := valkey.ParseURL(addr)
+		if err != nil {
+			return opt, err
+		}
+		opt.DisableCache = true
+		return opt, nil
+	}
+	return valkey.ClientOption{
+		InitAddress:  []string{addr},
+		DisableCache: true,
+	}, nil
 }
 
 func initValkeyClient() error {
-	client, err := valkey.NewClient(valkey.ClientOption{
-		InitAddress:  []string{defaultValkeyAddr()},
-		DisableCache: true,
-	})
+	opt, err := valkeyClientOption(defaultValkeyAddr())
+	if err != nil {
+		return err
+	}
+	client, err := valkey.NewClient(opt)
 	if err != nil {
 		return err
 	}
