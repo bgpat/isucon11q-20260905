@@ -13,6 +13,10 @@ datasources:
   url: http://127.0.0.1:3200
   jsonData:
     tracesToLogsV2:
+      datasourceUid: loki
+      spanStartTimeShift: '-1m'
+      spanEndTimeShift: '1m'
+      filterByTraceID: false
       customQuery: false
     serviceMap:
       datasourceUid: prometheus
@@ -20,3 +24,8 @@ datasources:
       enabled: true
     search:
       hide: false
+- name: Loki
+  uid: loki
+  type: loki
+  access: proxy
+  url: http://127.0.0.1:3100

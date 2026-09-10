@@ -48,6 +48,7 @@
 !/ops/test_valkey_metrics.py
 !/ops/install-nginx-custom.sh
 !/ops/render-tempo-config.sh
+!/ops/render-loki-config.sh
 # /home/isucon/.bashrc.backup
 /*
 !/home
@@ -100,3 +101,20 @@
 !/etc/nginx-custom/sites-enabled
 /etc/nginx-custom/sites-enabled/*
 !/etc/nginx-custom/sites-enabled/isucondition.conf
+
+# Loki 設定と systemd journal 収集（#404）
+/*
+!/files
+/files/*
+!/files/loki
+/files/loki/*
+!/files/loki/config.yml
+!/files/promtail
+/files/promtail/*
+!/files/promtail/config.yml
+!/files/grafana
+/files/grafana/*
+!/files/grafana/datasources.yml
+!/ops
+/ops/*
+!/ops/render-loki-config.sh

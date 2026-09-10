@@ -69,7 +69,7 @@ make monitoring
 
 Access to 3999 port from your browser.
 
-Grafana OSS 13.2.1 と Tempo 2.6.1 も同じ `make monitoring` で nohup 起動する。systemd には入れないので、サーバー再起動後は自動では立ち上がらない。Tempo は全競技サーバーが同一クラスタ（distributor + ingester + querier + query-frontend）に参加する。memberlist と ingester アドレスは `/files/hosts/*`（各サーバーの hostname と IP）から `/ops/render-tempo-config.sh` が生成する。Grafana はどのサーバーで起動しても Explore の Tempo（ローカル `:3200`）から ring 全体の trace をまとめて見られる。アプリは `ENABLE_TRACING=1`（`/etc/isucondition-observability.env`）のとき OTLP（`OTEL_EXPORTER_OTLP_*`）でローカル distributor へ送る。提出用計測では `ENABLE_TRACING=0` にしてアプリを再起動する（#12）。
+Grafana OSS 13.2.1、Tempo 2.6.1、Loki 3.7.7、Promtail 3.5.7 も同じ `make monitoring` で nohup 起動する。systemd には入れないので、サーバー再起動後は自動では立ち上がらない。Tempo は全競技サーバーが同一クラスタ（distributor + ingester + querier + query-frontend）に参加する。memberlist と ingester アドレスは `/files/hosts/*`（各サーバーの hostname と IP）から `/ops/render-tempo-config.sh` が生成する。Loki も同じ hosts から `/ops/render-loki-config.sh` が memberlist（`:7947`）を生成する。Promtail は各サーバーの systemd journal をローカル Loki（`:3100`）へ送る。Grafana はどのサーバーで起動しても Explore の Tempo（ローカル `:3200`）と Loki（ローカル `:3100`）から ring 全体をまとめて見られる。アプリは `ENABLE_TRACING=1`（`/etc/isucondition-observability.env`）のとき OTLP（`OTEL_EXPORTER_OTLP_*`）でローカル distributor へ送る。提出用計測では `ENABLE_TRACING=0` にしてアプリを再起動する（#12）。
 
 ### edit config file
 

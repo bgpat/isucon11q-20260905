@@ -125,7 +125,7 @@ endif
 	-git commit -m 'Add host'
 
 .PHONY: monitoring
-monitoring: prometheus node_exporter process-exporter grafana tempo
+monitoring: prometheus node_exporter process-exporter grafana tempo loki promtail
 
 .PHONY: deploy
 deploy:
@@ -228,6 +228,8 @@ process-exporter: /usr/local/bin/process-exporter /etc/process-exporter/all.yaml
 
 .PHONY: grafana
 grafana: /usr/local/bin/grafana
+	cp -f /files/grafana/datasources.yml /opt/grafana/conf/provisioning/datasources/datasources.yml
+	cp -f /files/grafana/dashboards.yml /opt/grafana/conf/provisioning/dashboards/dashboards.yml
 	-pkill $@
 	GF_SERVER_HTTP_PORT=3999 GF_AUTH_ANONYMOUS_ENABLED=true GF_AUTH_ANONYMOUS_ORG_ROLE=Admin nohup $@ server -homepath /opt/grafana &
 
@@ -253,3 +255,37 @@ tempo: /usr/local/bin/tempo /etc/tempo/config.yml
 /etc/tempo/config.yml: files/tempo/config.yml /ops/render-tempo-config.sh
 	mkdir -p /etc/tempo
 	/ops/render-tempo-config.sh
+
+# Loki は全サーバーで同一クラスタに参加。systemd enable しないので再起動後は起動しない。
+# Promtail が systemd journal をローカル Loki へ送る。
+.PHONY: loki
+loki: /usr/local/bin/loki /etc/loki/config.yml
+	-pkill loki || true
+	mkdir -p /tmp/loki/chunks /tmp/loki/rules /tmp/loki/wal /tmp/loki
+	nohup loki -config.file=/etc/loki/config.yml >/tmp/loki/loki.log 2>&1 &
+
+/usr/local/bin/loki:
+	mkdir -p /tmp/loki-dist
+	curl -sL -o /tmp/loki-linux-amd64.zip https://github.com/grafana/loki/releases/download/v3.7.7/loki-linux-amd64.zip
+	python3 -c 'import zipfile; zipfile.ZipFile("/tmp/loki-linux-amd64.zip").extractall("/tmp/loki-dist")'
+	install -m 755 /tmp/loki-dist/loki-linux-amd64 $@
+
+/etc/loki/config.yml: files/loki/config.yml /ops/render-loki-config.sh
+	mkdir -p /etc/loki
+	/ops/render-loki-config.sh
+
+.PHONY: promtail
+promtail: /usr/local/bin/promtail /etc/promtail/config.yml
+	-pkill promtail || true
+	mkdir -p /tmp/promtail
+	nohup promtail -config.file=/etc/promtail/config.yml >/tmp/promtail/promtail.log 2>&1 &
+
+/usr/local/bin/promtail:
+	mkdir -p /tmp/promtail-dist
+	curl -sL -o /tmp/promtail-linux-amd64.zip https://github.com/grafana/loki/releases/download/v3.5.7/promtail-linux-amd64.zip
+	python3 -c 'import zipfile; zipfile.ZipFile("/tmp/promtail-linux-amd64.zip").extractall("/tmp/promtail-dist")'
+	install -m 755 /tmp/promtail-dist/promtail-linux-amd64 $@
+
+/etc/promtail/config.yml: files/promtail/config.yml
+	mkdir -p /etc/promtail
+	cp -f /files/promtail/config.yml $@
