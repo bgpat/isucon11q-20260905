@@ -142,8 +142,6 @@ deploy-app:
 	runuser -u isucon -- sh -c 'cd /home/isucon/webapp/go && /home/isucon/local/go/bin/go build -buildvcs=false -o isucondition .'
 	systemctl daemon-reload
 	@if [ -x /usr/local/bin/valkey-server ]; then \
-		priv=$$(hostname -I | awk '{print $$1}'); \
-		sed -i -E "s/^bind .*/bind 127.0.0.1 $${priv}/" /etc/valkey/valkey.conf; \
 		systemctl enable valkey.service; \
 		systemctl restart valkey.service; \
 		systemctl is-active --quiet valkey.service; \
