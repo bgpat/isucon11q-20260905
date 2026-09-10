@@ -196,5 +196,12 @@ func applyTrendLatest(jiaIsuUUID string, rec conditionRecord) {
 	if !changed && patchTrendTimestampLocked(meta.ID, ts, level) {
 		return
 	}
-	trendDirty.Store(true)
+	body, locs, err := encodeTrendJSON(trendCache.response)
+	if err != nil {
+		trendDirty.Store(true)
+		return
+	}
+	trendCache.body = body
+	trendCache.locs = locs
+	noteTrendCacheRecomputed()
 }

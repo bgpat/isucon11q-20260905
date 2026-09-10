@@ -75,7 +75,7 @@ func TestPatchTrendTimestampSameWidth(t *testing.T) {
 	}
 }
 
-func TestApplyTrendLatestReordersThenRefreshFromMemory(t *testing.T) {
+func TestApplyTrendLatestReordersJSONImmediately(t *testing.T) {
 	invalidateTrendCache()
 	t.Cleanup(invalidateTrendCache)
 	res := []TrendResponse{{
@@ -95,16 +95,13 @@ func TestApplyTrendLatestReordersThenRefreshFromMemory(t *testing.T) {
 		Timestamp: time.Unix(1622641000, 0),
 		Condition: "is_dirty=false,is_overweight=false,is_broken=false",
 	})
-	if !trendDirty.Load() {
-		t.Fatal("並びが変わる更新は dirty にする")
+	if trendDirty.Load() {
+		t.Fatal("並び変更は即 encode し dirty にしない")
 	}
-	trendComputedAt.Store(time.Now().Add(-trendRecomputeMinInterval - time.Millisecond).UnixNano())
-	body, ok := refreshTrendJSONFromMemory()
+	body, ok := loadTrendJSONIfUsable()
 	if !ok {
-		t.Fatal("メモリから encode し直せる")
+		t.Fatal("並び変更直後の JSON を GET が使える")
 	}
-	info := res // 並びは body を見る
-	_ = info
 	idx2 := bytes.Index(body, []byte(`"isu_id": 2`))
 	idx1 := bytes.Index(body, []byte(`"isu_id": 1`))
 	if idx1 < 0 || idx2 < 0 || idx1 > idx2 {
@@ -112,5 +109,31 @@ func TestApplyTrendLatestReordersThenRefreshFromMemory(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte("1622641000")) {
 		t.Fatalf("新 timestamp が無い:\n%s", body)
+	}
+}
+
+func TestLoadTrendJSONIfUsableRejectsDirtyBody(t *testing.T) {
+	invalidateTrendCache()
+	t.Cleanup(invalidateTrendCache)
+	res := []TrendResponse{{
+		Character: "cute",
+		Info: []*TrendCondition{
+			{ID: 2, Timestamp: 1622640527},
+			{ID: 1, Timestamp: 1622640500},
+		},
+		Warning:  []*TrendCondition{},
+		Critical: []*TrendCondition{},
+	}}
+	gen, _, _ := snapshotTrendCache()
+	storeTrendCache(gen, res)
+	markTrendCacheDirty()
+	if _, ok := loadTrendJSONIfUsable(); ok {
+		t.Fatal("dirty な旧順 JSON を返してはいけない")
+	}
+	if _, ok := refreshTrendJSONFromMemory(); !ok {
+		t.Fatal("メモリから encode し直せる")
+	}
+	if _, ok := loadTrendJSONIfUsable(); !ok {
+		t.Fatal("refresh 後は JSON を返せる")
 	}
 }
