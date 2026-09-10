@@ -110,10 +110,16 @@ func forgetIsuUUID(jiaIsuUUID string) {
 	isuUUIDCache.Delete(jiaIsuUUID)
 }
 
-// abortUnactivatedIsu は activate 失敗時に、先に commit した isu 行とキャッシュを取り消す。
-func abortUnactivatedIsu(c echo.Context, jiaIsuUUID string) {
+// abortUnactivatedIsu は activate 失敗時に isu 行とキャッシュを取り消す。
+// 遅延 COMMIT では未コミット INSERT が行ロックを持つので、先に Rollback してから DELETE する。
+func abortUnactivatedIsu(c echo.Context, tx *sqlx.Tx, jiaIsuUUID string) {
 	forgetIsuUUID(jiaIsuUUID)
 	forgetIsuMeta(jiaIsuUUID)
+	if tx != nil {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			c.Logger().Errorf("failed to rollback unactivated isu %s: %v", jiaIsuUUID, err)
+		}
+	}
 	if _, err := db.Exec("DELETE FROM `isu` WHERE `jia_isu_uuid` = ?", jiaIsuUUID); err != nil {
 		c.Logger().Errorf("failed to delete unactivated isu %s: %v", jiaIsuUUID, err)
 	}
@@ -929,14 +935,14 @@ func postIsu(c echo.Context) error {
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {
 		c.Logger().Error(err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, tx, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	reqJIA, err := http.NewRequestWithContext(c.Request().Context(), http.MethodPost, targetURL, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		c.Logger().Error(err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, tx, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -944,7 +950,7 @@ func postIsu(c echo.Context) error {
 	res, err := doJIARequest(c.Request().Context(), reqJIA)
 	if err != nil {
 		c.Logger().Errorf("failed to request to JIAService: %v", err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, tx, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	defer res.Body.Close()
@@ -952,13 +958,13 @@ func postIsu(c echo.Context) error {
 	resBody, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		c.Logger().Error(err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, tx, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	if res.StatusCode != http.StatusAccepted {
 		c.Logger().Errorf("JIAService returned error: status code %v, message: %v", res.StatusCode, string(resBody))
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, tx, jiaIsuUUID)
 		return c.String(res.StatusCode, "JIAService returned error")
 	}
 
@@ -966,14 +972,14 @@ func postIsu(c echo.Context) error {
 	err = json.Unmarshal(resBody, &isuFromJIA)
 	if err != nil {
 		c.Logger().Error(err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, tx, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	_, err = tx.Exec("UPDATE `isu` SET `character` = ? WHERE  `jia_isu_uuid` = ?", isuFromJIA.Character, jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, tx, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	if err = tx.Commit(); err != nil {
