@@ -59,7 +59,7 @@ Add deploy key and run `git push -u origin master`.
 - `bench` は競技アプリを動かさない。#371 で isucon3 と誤認して初期化したため、#379 でアプリと nginx-custom を止めた
 - Go 1.27.1（`make upgrade-go`）。Valkey 9.0.6（`make install-valkey`）。Valkey の起動と enable は isucon1 のみ
 - DB 初期データは Git に入れず、Release [db-initial-20260906-0343](https://github.com/bgpat/isucon11q-20260905/releases/tag/db-initial-20260906-0343) に保存済み（#9）。作り直し後もこの Release を使い、同じ初期データを再取得しない
-- 再セットアップ: #305 #362 #371 #377 #386 #389 #398。役割修正: #379。接続設定: #19。ランタイム: #38。文書化: #341
+- 再セットアップ: #305 #362 #371 #377 #386 #389 #398 #409。役割修正: #379。接続設定: #19。ランタイム: #38。文書化: #341
 
 ### run monitoring servers
 
