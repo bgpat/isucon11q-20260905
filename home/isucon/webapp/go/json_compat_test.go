@@ -88,7 +88,7 @@ func TestGoJSONHTTPResponseCompatibility(t *testing.T) {
 	}
 }
 
-func TestWriteJSONMatchesEchoPretty(t *testing.T) {
+func TestWritePrettyJSONMatchesEchoPretty(t *testing.T) {
 	ts := make([]int64, 8)
 	for i := range ts {
 		ts[i] = int64(1000 + i)
@@ -102,40 +102,39 @@ func TestWriteJSONMatchesEchoPretty(t *testing.T) {
 			IsOverweight: 0,
 		},
 	}
+	init := InitializeResponse{Language: "go"}
+	me := GetMeResponse{JIAUserID: "user1"}
+	graph := []GraphResponse{
+		{StartAt: 0, EndAt: 3600, Data: nil, ConditionTimestamps: []int64{}},
+		{StartAt: 3600, EndAt: 7200, Data: &dp, ConditionTimestamps: ts},
+	}
+	cond := []*GetIsuConditionResponse{{
+		JIAIsuUUID:     "u",
+		IsuName:        "isu <x>&",
+		Timestamp:      1,
+		IsSitting:      true,
+		Condition:      "is_dirty=true,is_overweight=false,is_broken=false",
+		ConditionLevel: "warning",
+		Message:        "hello\nworld",
+	}}
 	samples := []struct {
-		name string
-		code int
-		v    interface{}
+		name  string
+		code  int
+		v     interface{}
+		write func(echo.Context) error
 	}{
-		{"initialize", http.StatusOK, InitializeResponse{Language: "go"}},
-		{"me", http.StatusOK, GetMeResponse{JIAUserID: "user1"}},
-		{"graph", http.StatusOK, []GraphResponse{
-			{StartAt: 0, EndAt: 3600, Data: nil, ConditionTimestamps: []int64{}},
-			{StartAt: 3600, EndAt: 7200, Data: &dp, ConditionTimestamps: ts},
+		{"initialize", http.StatusOK, init, func(c echo.Context) error {
+			return writePrettyJSON(c, http.StatusOK, init, 256, appendPrettyInitialize)
 		}},
-		{"condition", http.StatusOK, []*GetIsuConditionResponse{{
-			JIAIsuUUID:     "u",
-			IsuName:        "isu <x>&",
-			Timestamp:      1,
-			IsSitting:      true,
-			Condition:      "is_dirty=true,is_overweight=false,is_broken=false",
-			ConditionLevel: "warning",
-			Message:        "hello\nworld",
-		}}},
-		{"created-empty-maps", http.StatusCreated, jsonCompatibilityValue{
-			Text:       "<script>&日本語",
-			When:       time.Date(2026, 9, 6, 15, 0, 0, 123456789, time.FixedZone("JST", 9*60*60)),
-			EmptySlice: []string{},
-			EmptyMap:   map[string]string{},
-			Integer:    9007199254740991,
-			Float:      1.25,
-			Number:     stdjson.Number("12345678901234567890"),
+		{"me", http.StatusOK, me, func(c echo.Context) error {
+			return writePrettyJSON(c, http.StatusOK, me, 256, appendPrettyMe)
 		}},
-		{"nil-slice-map", http.StatusOK, struct {
-			N *int           `json:"n"`
-			S []int          `json:"s"`
-			M map[string]int `json:"m"`
-		}{}},
+		{"graph", http.StatusOK, graph, func(c echo.Context) error {
+			return writePrettyJSON(c, http.StatusOK, graph, prettyGraphCap(graph), appendPrettyGraphList)
+		}},
+		{"condition", http.StatusOK, cond, func(c echo.Context) error {
+			return writePrettyJSON(c, http.StatusOK, cond, prettyConditionCap(cond), appendPrettyConditionList)
+		}},
 	}
 
 	e := echo.New()
@@ -148,17 +147,17 @@ func TestWriteJSONMatchesEchoPretty(t *testing.T) {
 			if err := e.NewContext(req, recEcho).JSON(tc.code, tc.v); err != nil {
 				t.Fatalf("echo JSON: %v", err)
 			}
-			if err := writeJSON(e.NewContext(req, recFast), tc.code, tc.v); err != nil {
-				t.Fatalf("writeJSON: %v", err)
+			if err := tc.write(e.NewContext(req, recFast)); err != nil {
+				t.Fatalf("writePrettyJSON: %v", err)
 			}
 			if recEcho.Code != recFast.Code {
-				t.Fatalf("status echo=%d writeJSON=%d", recEcho.Code, recFast.Code)
+				t.Fatalf("status echo=%d writePrettyJSON=%d", recEcho.Code, recFast.Code)
 			}
 			if got, want := recFast.Header().Get(echo.HeaderContentType), recEcho.Header().Get(echo.HeaderContentType); got != want {
-				t.Fatalf("content-type echo=%q writeJSON=%q", want, got)
+				t.Fatalf("content-type echo=%q writePrettyJSON=%q", want, got)
 			}
 			if !bytes.Equal(recEcho.Body.Bytes(), recFast.Body.Bytes()) {
-				t.Fatalf("body mismatch\necho: %s\nwriteJSON: %s", recEcho.Body.Bytes(), recFast.Body.Bytes())
+				t.Fatalf("body mismatch\necho: %s\nwritePrettyJSON: %s", recEcho.Body.Bytes(), recFast.Body.Bytes())
 			}
 		})
 	}
