@@ -137,3 +137,43 @@ func TestLoadTrendJSONIfUsableRejectsDirtyBody(t *testing.T) {
 		t.Fatal("refresh 後は JSON を返せる")
 	}
 }
+
+func TestApplyTrendLatestIgnoresOlderTimestampAcrossReorder(t *testing.T) {
+	invalidateTrendCache()
+	t.Cleanup(invalidateTrendCache)
+	res := []TrendResponse{{
+		Character: "cute",
+		Info: []*TrendCondition{
+			{ID: 2, Timestamp: 1622640527},
+			{ID: 1, Timestamp: 1622640500},
+		},
+		Warning:  []*TrendCondition{},
+		Critical: []*TrendCondition{},
+	}}
+	gen, _, _ := snapshotTrendCache()
+	storeTrendCache(gen, res)
+	rememberIsuMeta(isuMeta{ID: 2, JIAIsuUUID: "u2", Character: "cute"})
+	rememberIsuMeta(isuMeta{ID: 1, JIAIsuUUID: "u1", Character: "cute"})
+
+	applyTrendLatest("u2", conditionRecord{
+		Timestamp: time.Unix(1622640400, 0),
+		Condition: "is_dirty=false,is_overweight=false,is_broken=false",
+	})
+	applyTrendLatest("u1", conditionRecord{
+		Timestamp: time.Unix(1622641000, 0),
+		Condition: "is_dirty=false,is_overweight=false,is_broken=false",
+	})
+	body, ok := loadTrendJSONIfUsable()
+	if !ok {
+		t.Fatal("並び変更後の JSON を GET が使える")
+	}
+	if bytes.Contains(body, []byte("1622640400")) {
+		t.Fatalf("古い timestamp が encode されている:\n%s", body)
+	}
+	if !bytes.Contains(body, []byte("1622640527")) {
+		t.Fatalf("id=2 の新しめの timestamp が消えている:\n%s", body)
+	}
+	if !bytes.Contains(body, []byte("1622641000")) {
+		t.Fatalf("id=1 の新 timestamp が無い:\n%s", body)
+	}
+}

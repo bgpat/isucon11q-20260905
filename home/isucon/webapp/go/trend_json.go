@@ -129,6 +129,12 @@ func upsertTrendLocked(meta isuMeta, ts int64, level string) (structureChanged b
 	ch := &trendCache.response[idx]
 	ensureTrendSlices(ch)
 	oldLevel, oldIdx, found := findTrendItem(ch, meta.ID)
+	if found {
+		oldTs := (*trendSlice(ch, oldLevel))[oldIdx].Timestamp
+		if ts < oldTs {
+			return false
+		}
+	}
 	if found && oldLevel == level {
 		s := trendSlice(ch, level)
 		if trendStillSorted(*s, oldIdx, ts, meta.ID) {
