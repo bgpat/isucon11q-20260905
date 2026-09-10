@@ -17,7 +17,6 @@ const (
 	conditionZKeyPrefix      = "cond:z:"
 	conditionLatestKeyPrefix = "cond:latest:"
 	conditionKeyScanMatch    = "cond:*"
-	isucon1Hostname          = "ip-192-168-0-11"
 	conditionListFetchFactor = 8
 	conditionListFetchMin    = 64
 	conditionMemberVer1      = 1
@@ -142,14 +141,7 @@ func defaultValkeyAddr() string {
 	if addr := os.Getenv("VALKEY_ADDR"); addr != "" {
 		return addr
 	}
-	host, err := os.Hostname()
-	if err == nil {
-		if host == isucon1Hostname || strings.HasPrefix(host, isucon1Hostname+".") {
-			return "127.0.0.1:6379"
-		}
-	}
-	// isucondition-1.t.isucon.dev は全台で 127.0.0.11 に向くため、isucon1 の hostname を使う。
-	return isucon1Hostname + ":6379"
+	return "localhost:6379"
 }
 
 func initValkeyClient() error {
@@ -160,12 +152,12 @@ func initValkeyClient() error {
 	if err != nil {
 		return err
 	}
-	valkeyClient = client
+	valkeyClient = wrapValkeyClient(client)
 	return nil
 }
 
-func conditionZKey(jiaIsuUUID string) string {
-	return conditionZKeyPrefix + jiaIsuUUID
+func conditionZKeyForLevel(jiaIsuUUID, level string) string {
+	return conditionZKeyPrefix + level + ":" + jiaIsuUUID
 }
 
 func conditionLatestKey(jiaIsuUUID string) string {
@@ -262,14 +254,17 @@ func insertIsuConditionsToValkey(ctx context.Context, jiaIsuUUID string, records
 	}
 	cmds := make(valkey.Commands, 0, len(records)+1)
 	var latest *conditionRecord
-	zkey := conditionZKey(jiaIsuUUID)
 	for i := range records {
 		rec := records[i]
 		member, err := encodeConditionMember(rec)
 		if err != nil {
 			return err
 		}
-		cmds = append(cmds, valkeyClient.B().Zadd().Key(zkey).ScoreMember().ScoreMember(float64(rec.Timestamp.Unix()), member).Build())
+		level, err := calculateConditionLevel(rec.Condition)
+		if err != nil {
+			return err
+		}
+		cmds = append(cmds, valkeyClient.B().Zadd().Key(conditionZKeyForLevel(jiaIsuUUID, level)).ScoreMember().ScoreMember(float64(rec.Timestamp.Unix()), member).Build())
 		if latest == nil || !rec.Timestamp.Before(latest.Timestamp) {
 			cp := rec
 			latest = &cp
@@ -442,6 +437,129 @@ func conditionListFetchCount(limit int, conditionLevel map[string]interface{}) i
 	return conditionListFetchLimit(limit)
 }
 
+func conditionLevelsFromMap(conditionLevel map[string]interface{}) []string {
+	levels := make([]string, 0, 3)
+	for _, lv := range []string{conditionLevelInfo, conditionLevelWarning, conditionLevelCritical} {
+		if _, ok := conditionLevel[lv]; ok {
+			levels = append(levels, lv)
+		}
+	}
+	return levels
+}
+
+type scoredCondition struct {
+	member string
+	rec    conditionRecord
+}
+
+func decodeScoredMembers(members []string) ([]scoredCondition, error) {
+	out := make([]scoredCondition, 0, len(members))
+	for _, member := range members {
+		rec, err := decodeConditionMember(member)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, scoredCondition{member: member, rec: rec})
+	}
+	return out, nil
+}
+
+func zrevBefore(a, b scoredCondition) bool {
+	ta := a.rec.Timestamp.Unix()
+	tb := b.rec.Timestamp.Unix()
+	if ta != tb {
+		return ta > tb
+	}
+	return a.member > b.member
+}
+
+func zrangeBefore(a, b scoredCondition) bool {
+	ta := a.rec.Timestamp.Unix()
+	tb := b.rec.Timestamp.Unix()
+	if ta != tb {
+		return ta < tb
+	}
+	return a.member < b.member
+}
+
+func mergeScoredConditions(groups [][]scoredCondition, limit int, before func(a, b scoredCondition) bool) []conditionRecord {
+	idx := make([]int, len(groups))
+	capOut := limit
+	if capOut < 1 {
+		for _, g := range groups {
+			capOut += len(g)
+		}
+	}
+	out := make([]conditionRecord, 0, capOut)
+	for {
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+		best := -1
+		for i, g := range groups {
+			if idx[i] >= len(g) {
+				continue
+			}
+			if best < 0 || before(g[idx[i]], groups[best][idx[best]]) {
+				best = i
+			}
+		}
+		if best < 0 {
+			break
+		}
+		out = append(out, groups[best][idx[best]].rec)
+		idx[best]++
+	}
+	return out
+}
+
+func recordsFromScored(group []scoredCondition) []conditionRecord {
+	out := make([]conditionRecord, 0, len(group))
+	for _, sm := range group {
+		out = append(out, sm.rec)
+	}
+	return out
+}
+
+func conditionScoreRangeDesc(endTime time.Time, startTime time.Time) (max string, min string) {
+	max = "(" + strconv.FormatInt(endTime.Unix(), 10)
+	min = "-inf"
+	if !startTime.IsZero() {
+		min = strconv.FormatInt(startTime.Unix(), 10)
+	}
+	return max, min
+}
+
+func getConditionsByTimeDesc(ctx context.Context, jiaIsuUUID string, endTime time.Time, startTime time.Time, limit int, levels []string) ([]conditionRecord, error) {
+	max, min := conditionScoreRangeDesc(endTime, startTime)
+	if limit < 1 {
+		limit = 1
+	}
+	if len(levels) == 0 {
+		return nil, nil
+	}
+	cmds := make(valkey.Commands, 0, len(levels))
+	for _, lv := range levels {
+		cmds = append(cmds, valkeyClient.B().Zrevrangebyscore().Key(conditionZKeyForLevel(jiaIsuUUID, lv)).Max(max).Min(min).Limit(0, int64(limit)).Build())
+	}
+	groups := make([][]scoredCondition, 0, len(levels))
+	for _, resp := range valkeyClient.DoMulti(ctx, cmds...) {
+		members, err := resp.AsStrSlice()
+		if err != nil {
+			return nil, err
+		}
+		group, err := decodeScoredMembers(members)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, group)
+	}
+	if len(groups) == 1 {
+		return recordsFromScored(groups[0]), nil
+	}
+	return mergeScoredConditions(groups, limit, zrevBefore), nil
+}
+
 func conditionLevelAllowMask(conditionLevel map[string]interface{}) int {
 	mask := 0
 	if _, ok := conditionLevel[conditionLevelInfo]; ok {
@@ -479,75 +597,55 @@ func memberMatchesAllowMask(member string, mask int) bool {
 	return mask&(1<<uint(w)) != 0
 }
 
-func conditionScoreRange(endTime time.Time, startTime time.Time) (max string, min string) {
-	max = "(" + strconv.FormatInt(endTime.Unix(), 10)
-	min = "-inf"
-	if !startTime.IsZero() {
-		min = strconv.FormatInt(startTime.Unix(), 10)
-	}
-	return max, min
-}
-
-func getConditionsByTimeDesc(ctx context.Context, jiaIsuUUID string, endTime time.Time, startTime time.Time, limit int) ([]conditionRecord, error) {
-	max, min := conditionScoreRange(endTime, startTime)
+func getConditionsByTimeDescMatching(ctx context.Context, jiaIsuUUID string, endTime time.Time, startTime time.Time, limit int, mask int, levels []string) ([]conditionRecord, error) {
+	max, min := conditionScoreRangeDesc(endTime, startTime)
 	if limit < 1 {
 		limit = 1
 	}
-	members, err := valkeyClient.Do(ctx,
-		valkeyClient.B().Zrevrangebyscore().Key(conditionZKey(jiaIsuUUID)).Max(max).Min(min).Limit(0, int64(limit)).Build(),
-	).AsStrSlice()
-	if err != nil {
-		return nil, err
+	if len(levels) == 0 {
+		return nil, nil
 	}
-	out := make([]conditionRecord, 0, len(members))
-	for _, member := range members {
-		rec, err := decodeConditionMember(member)
+	cmds := make(valkey.Commands, 0, len(levels))
+	for _, lv := range levels {
+		cmds = append(cmds, valkeyClient.B().Eval().Script(valkeyConditionMatchLua).Numkeys(1).Key(conditionZKeyForLevel(jiaIsuUUID, lv)).Arg(max).Arg(min).Arg(strconv.Itoa(limit)).Arg(strconv.Itoa(mask)).Build())
+	}
+	groups := make([][]scoredCondition, 0, len(levels))
+	for _, resp := range valkeyClient.DoMulti(ctx, cmds...) {
+		members, err := resp.AsStrSlice()
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, rec)
-	}
-	return out, nil
-}
-
-func getConditionsByTimeDescMatching(ctx context.Context, jiaIsuUUID string, endTime time.Time, startTime time.Time, limit int, mask int) ([]conditionRecord, error) {
-	max, min := conditionScoreRange(endTime, startTime)
-	if limit < 1 {
-		limit = 1
-	}
-	members, err := valkeyClient.Do(ctx,
-		valkeyClient.B().Eval().Script(valkeyConditionMatchLua).Numkeys(1).Key(conditionZKey(jiaIsuUUID)).Arg(max).Arg(min).Arg(strconv.Itoa(limit)).Arg(strconv.Itoa(mask)).Build(),
-	).AsStrSlice()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]conditionRecord, 0, len(members))
-	for _, member := range members {
-		rec, err := decodeConditionMember(member)
+		group, err := decodeScoredMembers(members)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, rec)
+		groups = append(groups, group)
 	}
-	return out, nil
+	if len(groups) == 1 {
+		return recordsFromScored(groups[0]), nil
+	}
+	return mergeScoredConditions(groups, limit, zrevBefore), nil
 }
 
 func getConditionsByTimeAscRange(ctx context.Context, jiaIsuUUID string, start time.Time, end time.Time) ([]conditionRecord, error) {
 	min := strconv.FormatInt(start.Unix(), 10)
 	max := "(" + strconv.FormatInt(end.Unix(), 10)
-	members, err := valkeyClient.Do(ctx,
-		valkeyClient.B().Zrangebyscore().Key(conditionZKey(jiaIsuUUID)).Min(min).Max(max).Build(),
-	).AsStrSlice()
-	if err != nil {
-		return nil, err
+	levels := []string{conditionLevelInfo, conditionLevelWarning, conditionLevelCritical}
+	cmds := make(valkey.Commands, 0, len(levels))
+	for _, lv := range levels {
+		cmds = append(cmds, valkeyClient.B().Zrangebyscore().Key(conditionZKeyForLevel(jiaIsuUUID, lv)).Min(min).Max(max).Build())
 	}
-	out := make([]conditionRecord, 0, len(members))
-	for _, member := range members {
-		rec, err := decodeConditionMember(member)
+	groups := make([][]scoredCondition, 0, len(levels))
+	for _, resp := range valkeyClient.DoMulti(ctx, cmds...) {
+		members, err := resp.AsStrSlice()
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, rec)
+		group, err := decodeScoredMembers(members)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, group)
 	}
-	return out, nil
+	return mergeScoredConditions(groups, 0, zrangeBefore), nil
 }
