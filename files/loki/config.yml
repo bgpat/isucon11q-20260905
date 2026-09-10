@@ -1,0 +1,72 @@
+# Loki 分散クラスタ（#404）。全競技サーバーが同一構成で参加する。
+# - HTTP 127.0.0.1:3100（Grafana Explore）
+# - gRPC 0.0.0.0:9096（ring 経由の query）
+# - Promtail がローカル journal を push
+# /ops/render-loki-config.sh が /files/hosts/* から IP を読んでプレースホルダ行を置換する。
+# memberlist は Tempo の 7946 と被らない 7947 を使う。
+auth_enabled: false
+
+server:
+  http_listen_address: 127.0.0.1
+  http_listen_port: 3100
+  grpc_listen_address: 0.0.0.0
+  grpc_listen_port: 9096
+  log_level: info
+
+common:
+  instance_addr: __LOKI_INSTANCE_ADDR__
+  path_prefix: /tmp/loki
+  replication_factor: 1
+  ring:
+    instance_addr: __LOKI_INSTANCE_ADDR__
+    kvstore:
+      store: memberlist
+  storage:
+    filesystem:
+      chunks_directory: /tmp/loki/chunks
+      rules_directory: /tmp/loki/rules
+
+ingester:
+  wal:
+    enabled: true
+    dir: /tmp/loki/wal
+  lifecycler:
+    address: __LOKI_INSTANCE_ADDR__
+
+memberlist:
+  abort_if_cluster_join_fails: false
+  bind_addr:
+    - 0.0.0.0
+  bind_port: 7947
+  advertise_addr: __LOKI_INSTANCE_ADDR__
+  join_members:
+__LOKI_JOIN_MEMBERS__
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  allow_structured_metadata: true
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  volume_enabled: true
+
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+
+frontend:
+  encoding: protobuf
+
+analytics:
+  reporting_enabled: false
