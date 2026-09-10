@@ -31,6 +31,19 @@ func TestCachedIconRememberAndInvalidate(t *testing.T) {
 	}
 }
 
+func TestForgetCachedIcon(t *testing.T) {
+	invalidateCachedIcon()
+	t.Cleanup(invalidateCachedIcon)
+
+	const user = "user-a"
+	const uuid = "11111111-1111-1111-1111-111111111111"
+	rememberCachedIcon(user, uuid)
+	forgetCachedIcon(user, uuid)
+	if hasCachedIcon(user, uuid) {
+		t.Fatal("forgetCachedIcon should clear key")
+	}
+}
+
 func TestServeCachedIsuIconSkipsStatWhenRemembered(t *testing.T) {
 	invalidateCachedIcon()
 	t.Cleanup(invalidateCachedIcon)

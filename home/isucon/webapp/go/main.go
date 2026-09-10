@@ -104,9 +104,10 @@ func forgetIsuUUID(jiaIsuUUID string) {
 }
 
 // abortUnactivatedIsu は activate 失敗時に、先に commit した isu 行とキャッシュを取り消す。
-func abortUnactivatedIsu(c echo.Context, jiaIsuUUID string) {
+func abortUnactivatedIsu(c echo.Context, jiaUserID, jiaIsuUUID string) {
 	forgetIsuUUID(jiaIsuUUID)
 	forgetIsuMeta(jiaIsuUUID)
+	removeCachedIsuIcon(jiaUserID, jiaIsuUUID)
 	if _, err := db.Exec("DELETE FROM `isu` WHERE `jia_isu_uuid` = ?", jiaIsuUUID); err != nil {
 		c.Logger().Errorf("failed to delete unactivated isu %s: %v", jiaIsuUUID, err)
 	}
@@ -221,9 +222,18 @@ func rememberCachedIcon(jiaUserID, jiaIsuUUID string) {
 	iconFileCache.Store(cachedIconKey(jiaUserID, jiaIsuUUID), struct{}{})
 }
 
+func forgetCachedIcon(jiaUserID, jiaIsuUUID string) {
+	iconFileCache.Delete(cachedIconKey(jiaUserID, jiaIsuUUID))
+}
+
 func hasCachedIcon(jiaUserID, jiaIsuUUID string) bool {
 	_, ok := iconFileCache.Load(cachedIconKey(jiaUserID, jiaIsuUUID))
 	return ok
+}
+
+func removeCachedIsuIcon(jiaUserID, jiaIsuUUID string) {
+	forgetCachedIcon(jiaUserID, jiaIsuUUID)
+	_ = os.Remove(isuIconCachePath(jiaUserID, jiaIsuUUID))
 }
 
 func invalidateCachedIcon() {
@@ -888,8 +898,8 @@ func postIsu(c echo.Context) error {
 	defer tx.Rollback()
 
 	insertRes, err := tx.Exec("INSERT INTO `isu`"+
-		"	(`jia_isu_uuid`, `name`, `image`, `jia_user_id`) VALUES (?, ?, ?, ?)",
-		jiaIsuUUID, isuName, image, jiaUserID)
+		"	(`jia_isu_uuid`, `name`, `jia_user_id`) VALUES (?, ?, ?)",
+		jiaIsuUUID, isuName, jiaUserID)
 	if err != nil {
 		mysqlErr, ok := err.(*mysql.MySQLError)
 
@@ -905,10 +915,17 @@ func postIsu(c echo.Context) error {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+	// 配信の正は nginx が読むファイル。BLOB を MySQL に入れないので、行が見える前に書く。
+	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
+		removeCachedIsuIcon(jiaUserID, jiaIsuUUID)
+		c.Logger().Errorf("failed to cache icon: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
 	// Commit the parent row before asking JIA to activate the ISU. Activation can
 	// immediately post conditions; holding this transaction would otherwise
 	// deadlock with the condition table's foreign-key lock on isu.
 	if err = tx.Commit(); err != nil {
+		removeCachedIsuIcon(jiaUserID, jiaIsuUUID)
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -920,14 +937,14 @@ func postIsu(c echo.Context) error {
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {
 		c.Logger().Error(err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, jiaUserID, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	reqJIA, err := http.NewRequestWithContext(c.Request().Context(), http.MethodPost, targetURL, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		c.Logger().Error(err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, jiaUserID, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -935,7 +952,7 @@ func postIsu(c echo.Context) error {
 	res, err := doJIARequest(c.Request().Context(), reqJIA)
 	if err != nil {
 		c.Logger().Errorf("failed to request to JIAService: %v", err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, jiaUserID, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	defer res.Body.Close()
@@ -943,13 +960,13 @@ func postIsu(c echo.Context) error {
 	resBody, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		c.Logger().Error(err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, jiaUserID, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	if res.StatusCode != http.StatusAccepted {
 		c.Logger().Errorf("JIAService returned error: status code %v, message: %v", res.StatusCode, string(resBody))
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, jiaUserID, jiaIsuUUID)
 		return c.String(res.StatusCode, "JIAService returned error")
 	}
 
@@ -957,14 +974,14 @@ func postIsu(c echo.Context) error {
 	err = json.Unmarshal(resBody, &isuFromJIA)
 	if err != nil {
 		c.Logger().Error(err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, jiaUserID, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	_, err = db.Exec("UPDATE `isu` SET `character` = ? WHERE  `jia_isu_uuid` = ?", isuFromJIA.Character, jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
-		abortUnactivatedIsu(c, jiaIsuUUID)
+		abortUnactivatedIsu(c, jiaUserID, jiaIsuUUID)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -982,11 +999,6 @@ func postIsu(c echo.Context) error {
 		Name:       meta.Name,
 		Character:  meta.Character,
 		JIAUserID:  meta.JIAUserID,
-		Image:      image,
-	}
-
-	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
-		c.Logger().Errorf("failed to cache icon: %v", err)
 	}
 
 	return writePrettyJSON(c, http.StatusCreated, isu, 256, appendPrettyIsu)
