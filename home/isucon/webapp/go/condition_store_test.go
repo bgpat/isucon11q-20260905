@@ -173,6 +173,13 @@ func TestDefaultValkeyAddrUsesEnv(t *testing.T) {
 	}
 }
 
+func TestDefaultValkeyAddrLocalhost(t *testing.T) {
+	t.Setenv("VALKEY_ADDR", "")
+	if got := defaultValkeyAddr(); got != "127.0.0.1:6379" {
+		t.Fatalf("addr=%q", got)
+	}
+}
+
 func TestConditionMembersAreUnique(t *testing.T) {
 	rec := conditionRecord{
 		Timestamp: time.Unix(1, 0),

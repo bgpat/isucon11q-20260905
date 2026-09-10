@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Valkey を公式ソースから固定版で入れる。root で / 上の Git 作業ツリーから実行する。
-# バイナリは全台に入れる。systemd の enable/start は isucon1（ip-192-168-0-11）だけ。
+# バイナリを入れたホストでは systemd の enable/start も行う。bind は設定ファイルの 0.0.0.0 のまま。
 set -euo pipefail
 
 VALKEY_VERSION="9.0.6"
@@ -11,18 +11,11 @@ VALKEY_PREFIX="/usr/local"
 VALKEY_CONF="/etc/valkey/valkey.conf"
 VALKEY_DATA="/var/lib/valkey"
 VALKEY_USER="valkey"
-ISUCON1_HOSTNAME="ip-192-168-0-11"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "root で実行してください" >&2
   exit 1
 fi
-
-is_isucon1() {
-  local host
-  host="$(hostname -s 2>/dev/null || hostname)"
-  [[ "${host}" == "${ISUCON1_HOSTNAME}" ]]
-}
 
 install_build_deps() {
   apt-get update -qq
@@ -69,16 +62,6 @@ install_config() {
     echo "設定ファイルがありません: ${VALKEY_CONF}" >&2
     exit 1
   fi
-  if is_isucon1; then
-    local priv
-    priv="$(hostname -I | awk '{print $1}')"
-    if [[ -z "${priv}" ]]; then
-      echo "私有 IP を取得できません" >&2
-      exit 1
-    fi
-    # isucondition-1.t.isucon.dev は全台で 127.0.0.11 に向くため、私有 IP で listen する。
-    sed -i -E "s/^bind .*/bind 127.0.0.1 ${priv}/" "${VALKEY_CONF}"
-  fi
   chown root:root "${VALKEY_CONF}"
   chmod 0644 "${VALKEY_CONF}"
 }
@@ -96,23 +79,18 @@ install_unit() {
 }
 
 configure_service() {
-  if is_isucon1; then
-    systemctl enable valkey.service
-    systemctl restart valkey.service
-    local i
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-      if "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -qx PONG; then
-        break
-      fi
-      sleep 0.5
-    done
-    systemctl is-active --quiet valkey.service
-    "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping | grep -qx PONG
-    echo "Valkey を isucon1 で起動しました: $("${VALKEY_PREFIX}/bin/valkey-server" --version)"
-  else
-    systemctl disable --now valkey.service 2>/dev/null || true
-    echo "Valkey バイナリを入れました（このホストでは起動しません）: $(hostname -s)"
-  fi
+  systemctl enable valkey.service
+  systemctl restart valkey.service
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -qx PONG; then
+      break
+    fi
+    sleep 0.5
+  done
+  systemctl is-active --quiet valkey.service
+  "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping | grep -qx PONG
+  echo "Valkey を起動しました ($(hostname -s)): $("${VALKEY_PREFIX}/bin/valkey-server" --version)"
 }
 
 install_build_deps

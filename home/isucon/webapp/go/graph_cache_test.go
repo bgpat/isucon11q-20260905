@@ -113,46 +113,51 @@ func TestGraphCacheInvalidateOverlappingHours(t *testing.T) {
 	}
 }
 
-func TestInvalidateGraphCacheFromInsertArgs(t *testing.T) {
+func TestGraphCacheSetIfGenDiscardsStale(t *testing.T) {
 	invalidateGraphCache()
 	t.Cleanup(invalidateGraphCache)
 
-	start := time.Unix(1628521200, 0)
-	key := graphCacheKey{jiaUserID: "u", jiaIsuUUID: "isu", startUnix: start.Unix()}
-	other := graphCacheKey{jiaUserID: "u", jiaIsuUUID: "keep", startUnix: start.Unix()}
-	graphCacheSet(key, []byte("a"))
-	graphCacheSet(other, []byte("b"))
-
-	invalidateGraphCacheFromInsertArgs([]interface{}{
-		"isu", start.Add(time.Hour), false, "cond", "m",
-		"isu", start.Add(2 * time.Hour), true, "cond", "m",
-	})
-	if _, ok := graphCacheGet(key); ok {
-		t.Fatal("insert args in the window should invalidate")
+	key := graphCacheKey{jiaUserID: "u", jiaIsuUUID: "isu", startUnix: 1628521200}
+	_, seen, ok := graphCacheLookup(key)
+	if ok {
+		t.Fatal("expected miss")
 	}
-	if _, ok := graphCacheGet(other); !ok {
-		t.Fatal("other uuid should remain")
+	invalidateGraphCacheForConditions("isu", []time.Time{time.Unix(1628521200, 0)})
+	if graphCacheSetIfGen(key, []byte("stale\n"), seen) {
+		t.Fatal("stale generate should not be stored")
+	}
+	if _, ok := graphCacheGet(key); ok {
+		t.Fatal("cache should stay empty after discarded set")
+	}
+
+	_, seen, ok = graphCacheLookup(key)
+	if ok {
+		t.Fatal("expected miss before fresh set")
+	}
+	if !graphCacheSetIfGen(key, []byte("fresh\n"), seen) {
+		t.Fatal("matching gen should store")
+	}
+	got, ok := graphCacheGet(key)
+	if !ok || string(got) != "fresh\n" {
+		t.Fatalf("got %q ok=%v", got, ok)
 	}
 }
 
-func TestMarshalPrettyJSONMatchesWriteJSON(t *testing.T) {
+func TestMarshalPrettyGraphMatchesWriteJSON(t *testing.T) {
 	res := []GraphResponse{
 		{StartAt: 0, EndAt: 3600, Data: nil, ConditionTimestamps: []int64{}},
 		{StartAt: 3600, EndAt: 7200, Data: &GraphDataPoint{Score: 66, Percentage: ConditionsPercentage{Sitting: 50}}, ConditionTimestamps: []int64{3600, 3610}},
 	}
-	body, err := marshalPrettyJSON(res)
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := marshalPrettyGraph(res)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	if err := writeJSON(e.NewContext(req, rec), http.StatusOK, res); err != nil {
+	if err := writePrettyJSON(e.NewContext(req, rec), http.StatusOK, res, prettyGraphCap(res), appendPrettyGraphList); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(rec.Body.Bytes(), body) {
-		t.Fatalf("writeJSON body mismatch\nwriteJSON: %s\nmarshal: %s", rec.Body.Bytes(), body)
+		t.Fatalf("writePrettyJSON body mismatch\nwritePrettyJSON: %s\nmarshal: %s", rec.Body.Bytes(), body)
 	}
 
 	rec2 := httptest.NewRecorder()

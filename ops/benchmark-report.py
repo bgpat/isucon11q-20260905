@@ -12,6 +12,7 @@ import tarfile
 import time
 
 from benchmark_sql import analyze
+from valkey_metrics import analyze as analyze_valkey
 
 WRAPPER = pathlib.Path(__file__).with_name('benchmark-assets.sh')
 
@@ -107,7 +108,12 @@ def summarize(path):
         flat = pool.submit(profile, path/'cpu.pprof', False)
         cum = pool.submit(profile, path/'cpu.pprof', True)
         metrics = pool.submit(cpu, path/'prometheus-cpu.json')
-        result = dict(commit=timing['commit'], load=timing['load'], end=timing['end'], sql_window=[start,end], score=score, status=state, sql=sql.result(), flat=flat.result(), cumulative=cum.result(), cpu=metrics.result(), db_delta={k:after[k]-v for k,v in before.items() if not k.startswith('Threads_')})
+        valkey = None
+        valkey_after = path/'valkey-after.txt'
+        if valkey_after.is_file():
+            valkey_before = path/'valkey-before.txt'
+            valkey = analyze_valkey(valkey_before.read_text() if valkey_before.is_file() else '', valkey_after.read_text())
+        result = dict(commit=timing['commit'], load=timing['load'], end=timing['end'], sql_window=[start,end], score=score, status=state, sql=sql.result(), flat=flat.result(), cumulative=cum.result(), cpu=metrics.result(), db_delta={k:after[k]-v for k,v in before.items() if not k.startswith('Threads_')}, valkey=valkey)
         for key, values in result['cpu'].items():
             if values['start'] is None or values['start'] < timing['load'] - 1 or values['end'] > timing['end'] + 1:
                 raise ValueError('CPU時系列がLOAD窓の外: ' + key)
@@ -145,11 +151,24 @@ def main():
         raise ValueError('SQL比較窓の長さが不一致')
     parts = [f'PR #{args.pr} 比較計測\n\n関連 Issue: https://github.com/{args.repo}/issues/{args.issue}\n\nRelease: https://github.com/{args.repo}/releases/tag/{args.tag}',
              '### 事実（実測）', table(['指標','baseline','candidate'],[['score',baseline['score'],candidate['score']],['結果',baseline['status'],candidate['status']],['exact commit',baseline['commit'],candidate['commit']],['SELECT Query_time合計 s',*[f"{sum(r['seconds'] for r in v['sql'] if r['sql'].startswith('SELECT ')):.6f}" for v in (baseline,candidate)]]]),
-             'Query_timeは待機を含む経過時間でCPU時間ではない。pprofの比率は総CPU sampleが分母。flatは関数自身、cumulativeは子孫を含み重複するため合計不可。CPUは保存済みPrometheus rate系列の台形積分による推定値。DB差分には初期化が含まれる。']
+             'Query_timeは待機を含む経過時間でCPU時間ではない。pprofの比率は総CPU sampleが分母。flatは関数自身、cumulativeは子孫を含み重複するため合計不可。CPUは保存済みPrometheus rate系列の台形積分による推定値。DB差分には初期化が含まれる。Valkey の commandstats はベンチ前後スナップショットの差分（RESETSTAT した場合は after を区間値）。instantaneous_* は取得時点の値であり LOAD 平均ではない。']
     for label,data in [('baseline',baseline),('candidate',candidate)]:
         parts += ['### '+label+' 計測条件',json.dumps({k:data[k] for k in ('load','end','sql_window','commit')},ensure_ascii=False),
                   table(['プロセス(instance/group)','推定CPU秒','平均core','開始epoch','終了epoch'],[[k,f"{v['seconds']:.6f}",v['mean_cores'],v['start'],v['end']] for k,v in sorted(data['cpu'].items(),key=lambda item:-item[1]['seconds'])[:20]]),
-                  table(['DB指標','差分'],data['db_delta'].items()),'### '+label+' SQL top20',
+                  table(['DB指標','差分'],data['db_delta'].items())]
+        if data.get('valkey'):
+            valkey = data['valkey']
+            zset = valkey['zset']
+            parts += ['### '+label+' Valkey commandstats top20（usec合計）',
+                      'RESETSTAT 検知: '+('あり。after を区間値として使う。' if valkey['reset'] else 'なし。after-before 差分。')+' slowlog_len='+str(valkey['slowlog_len']),
+                      table(['順位','コマンド','回数','usec合計','1回usec','rejected','failed'],
+                            [[i,r['command'],r['calls'],r['usec'],(f"{r['usec_per_call']:.3f}" if r['usec_per_call'] is not None else ''),r['rejected'],r['failed']] for i,r in enumerate(valkey['commands'][:20],1)]),
+                      '### '+label+' Valkey 統計',
+                      table(['指標','before','after','差分','種別'],
+                            [[r['key'],r['before'],r['after'],r['delta'],r['kind']] for r in valkey['stats']]),
+                      '### '+label+' Valkey ZSET',
+                      table(['指標','値'],[['zset_keys',zset['keys']],['members',zset['members']],['max',zset['max']],['p50',zset['p50']],['p95',zset['p95']],['latest_keys',zset['latest_keys']]])]
+        parts += ['### '+label+' SQL top20',
                   table(['順位','SQL','回数','Query合計s','平均ms','最大ms','Lock合計s','Rows examined','Rows sent'],[[i,r['sql'],r['count'],f"{r['seconds']:.6f}",f"{r['seconds']/r['count']*1000:.6f}",f"{r['max_seconds']*1000:.3f}",f"{r['lock']:.6f}",r['examined'],r['sent']] for i,r in enumerate(data['sql'][:20],1)])]
         for mode in ('flat','cumulative'):
             parts += ['### '+label+' pprof '+mode+' top20',' / '.join(data[mode]['metadata']),table(['順位','関数','flat CPU','flat比','cumulative CPU','cumulative比'],[[i,*row] for i,row in enumerate(data[mode]['rows'],1)])]
@@ -161,7 +180,7 @@ def main():
     composed = time.monotonic()
     with tarfile.open(args.output/'assets.tar.gz','w:gz',compresslevel=1) as archive:
         for label,path in [('baseline',args.baseline),('candidate',args.candidate)]:
-            for name in ('bench.log','timing.json','cpu.pprof','slow.log.gz','access.log.gz','error.log','journal.log','db-before.txt','db-after.txt','prometheus-cpu.json','prometheus-db.json','state-before.txt'):
+            for name in ('bench.log','timing.json','cpu.pprof','slow.log.gz','access.log.gz','error.log','journal.log','db-before.txt','db-after.txt','prometheus-cpu.json','prometheus-db.json','state-before.txt','valkey-before.txt','valkey-after.txt'):
                 if (path/name).is_file():
                     archive.add(path/name,arcname=label+'/'+name)
         for name in ('report.md','metrics.json'):

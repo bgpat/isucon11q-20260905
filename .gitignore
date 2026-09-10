@@ -28,6 +28,9 @@
 /etc/systemd/system/*
 !/etc/systemd/system/isucondition.go.service
 !/etc/systemd/system/nginx-custom.service
+!/etc/systemd/system/multi-user.target.wants
+/etc/systemd/system/multi-user.target.wants/*
+!/etc/systemd/system/multi-user.target.wants/nginx-custom.service
 # MariaDB 11.4 更新の原本
 !/etc/mysql
 /etc/mysql/*
@@ -40,7 +43,11 @@
 !/ops/benchmark-report.py
 !/ops/benchmark_sql.py
 !/ops/test_benchmark_report.py
+!/ops/collect-valkey.sh
+!/ops/valkey_metrics.py
+!/ops/test_valkey_metrics.py
 !/ops/install-nginx-custom.sh
+!/ops/render-tempo-config.sh
 # /home/isucon/.bashrc.backup
 /*
 !/home
@@ -49,3 +56,47 @@
 /home/isucon/*
 !/home/isucon/.bashrc.backup
 
+# /etc/sudoers
+/*
+!/etc
+/etc/*
+!/etc/sudoers
+
+# /etc/mysql/my.cnf
+/*
+!/etc
+/etc/*
+!/etc/mysql
+/etc/mysql/*
+!/etc/mysql/my.cnf
+
+# Tempo 設定と GET /api/trend のトレース（#366）
+/*
+!/files
+/files/*
+!/files/tempo
+/files/tempo/*
+!/files/tempo/config.yml
+!/home
+/home/*
+!/home/isucon
+/home/isucon/*
+!/home/isucon/webapp
+/home/isucon/webapp/*
+!/home/isucon/webapp/go
+/home/isucon/webapp/go/*
+!/home/isucon/webapp/go/tracing.go
+
+# /etc/nginx-custom
+/*
+!/etc
+/etc/*
+!/etc/nginx-custom
+/etc/nginx-custom/*
+!/etc/nginx-custom/nginx.conf
+!/etc/nginx-custom/sites-available
+/etc/nginx-custom/sites-available/*
+!/etc/nginx-custom/sites-available/isucondition.conf
+!/etc/nginx-custom/sites-enabled
+/etc/nginx-custom/sites-enabled/*
+!/etc/nginx-custom/sites-enabled/isucondition.conf
