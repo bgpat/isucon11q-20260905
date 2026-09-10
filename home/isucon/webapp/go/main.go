@@ -40,6 +40,9 @@ const (
 	jiaJWTSigningKeyPath      = "../ec256-public.pem"
 	defaultIconFilePath       = "../NoImage.jpg"
 	isuIconCacheDir           = "/home/isucon/webapp/public/.isucondition-icon-cache"
+	isuIconExistingDirName    = "existing"
+	isuIconNewDirName         = "new"
+	isuIconExistingReadyName  = ".ready"
 	isuIconInternalPath       = "/_isucondition_icon_cache/"
 	defaultJIAServiceURL      = "http://localhost:5000"
 	mysqlErrNumDuplicateEntry = 1062
@@ -209,17 +212,29 @@ func writeJSONBytes(c echo.Context, code int, body []byte) error {
 	return err
 }
 
-func isuIconCachePath(jiaUserID, jiaIsuUUID string) string {
+func isuIconFileName(jiaUserID, jiaIsuUUID string) string {
 	digest := sha256.Sum256([]byte(jiaUserID + "\x00" + jiaIsuUUID))
-	return filepath.Join(isuIconCacheDir, fmt.Sprintf("%x", digest))
+	return fmt.Sprintf("%x", digest)
+}
+
+func isuIconRel(kind, jiaUserID, jiaIsuUUID string) string {
+	return kind + "/" + isuIconFileName(jiaUserID, jiaIsuUUID)
+}
+
+func isuIconFilePath(kind, jiaUserID, jiaIsuUUID string) string {
+	return filepath.Join(isuIconCacheDir, kind, isuIconFileName(jiaUserID, jiaIsuUUID))
+}
+
+func isuIconExistingReadyPath() string {
+	return filepath.Join(isuIconCacheDir, isuIconExistingDirName, isuIconExistingReadyName)
 }
 
 func cachedIconKey(jiaUserID, jiaIsuUUID string) string {
 	return jiaUserID + "\x00" + jiaIsuUUID
 }
 
-func rememberCachedIcon(jiaUserID, jiaIsuUUID string) {
-	iconFileCache.Store(cachedIconKey(jiaUserID, jiaIsuUUID), struct{}{})
+func rememberCachedIcon(jiaUserID, jiaIsuUUID, rel string) {
+	iconFileCache.Store(cachedIconKey(jiaUserID, jiaIsuUUID), rel)
 }
 
 func forgetCachedIcon(jiaUserID, jiaIsuUUID string) {
@@ -231,9 +246,21 @@ func hasCachedIcon(jiaUserID, jiaIsuUUID string) bool {
 	return ok
 }
 
+func cachedIconRel(jiaUserID, jiaIsuUUID string) (string, bool) {
+	v, ok := iconFileCache.Load(cachedIconKey(jiaUserID, jiaIsuUUID))
+	if !ok {
+		return "", false
+	}
+	rel, _ := v.(string)
+	if rel == "" {
+		return "", false
+	}
+	return rel, true
+}
+
 func removeCachedIsuIcon(jiaUserID, jiaIsuUUID string) {
 	forgetCachedIcon(jiaUserID, jiaIsuUUID)
-	_ = os.Remove(isuIconCachePath(jiaUserID, jiaIsuUUID))
+	_ = os.Remove(isuIconFilePath(isuIconNewDirName, jiaUserID, jiaIsuUUID))
 }
 
 func invalidateCachedIcon() {
@@ -243,13 +270,14 @@ func invalidateCachedIcon() {
 	})
 }
 
-func cacheIsuIcon(jiaUserID, jiaIsuUUID string, image []byte) (string, error) {
-	if err := os.MkdirAll(isuIconCacheDir, 0755); err != nil {
+func cacheIsuIcon(kind, jiaUserID, jiaIsuUUID string, image []byte) (string, error) {
+	dir := filepath.Join(isuIconCacheDir, kind)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
 
-	path := isuIconCachePath(jiaUserID, jiaIsuUUID)
-	file, err := os.CreateTemp(isuIconCacheDir, ".tmp-*")
+	path := isuIconFilePath(kind, jiaUserID, jiaIsuUUID)
+	file, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		return "", err
 	}
@@ -270,21 +298,78 @@ func cacheIsuIcon(jiaUserID, jiaIsuUUID string, image []byte) (string, error) {
 	if err := os.Rename(tempPath, path); err != nil {
 		return "", err
 	}
-	rememberCachedIcon(jiaUserID, jiaIsuUUID)
+	rememberCachedIcon(jiaUserID, jiaIsuUUID, isuIconRel(kind, jiaUserID, jiaIsuUUID))
 	return path, nil
 }
 
 func serveCachedIsuIcon(c echo.Context, jiaUserID, jiaIsuUUID string) bool {
-	path := isuIconCachePath(jiaUserID, jiaIsuUUID)
-	if !hasCachedIcon(jiaUserID, jiaIsuUUID) {
-		if _, err := os.Stat(path); err != nil {
+	rel, ok := cachedIconRel(jiaUserID, jiaIsuUUID)
+	if !ok {
+		for _, kind := range []string{isuIconNewDirName, isuIconExistingDirName} {
+			path := isuIconFilePath(kind, jiaUserID, jiaIsuUUID)
+			if _, err := os.Stat(path); err != nil {
+				continue
+			}
+			rel = isuIconRel(kind, jiaUserID, jiaIsuUUID)
+			rememberCachedIcon(jiaUserID, jiaIsuUUID, rel)
+			ok = true
+			break
+		}
+		if !ok {
 			return false
 		}
-		rememberCachedIcon(jiaUserID, jiaIsuUUID)
 	}
-	c.Response().Header().Set("X-Accel-Redirect", isuIconInternalPath+filepath.Base(path))
+	c.Response().Header().Set("X-Accel-Redirect", isuIconInternalPath+rel)
 	c.Response().Header().Set("Cache-Control", "private, max-age=60, must-revalidate")
 	return true
+}
+
+func exportExistingIsuIcons() error {
+	if _, err := os.Stat(isuIconExistingReadyPath()); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Join(isuIconCacheDir, isuIconExistingDirName), 0755); err != nil {
+		return err
+	}
+
+	type existingIcon struct {
+		JIAUserID  string `db:"jia_user_id"`
+		JIAIsuUUID string `db:"jia_isu_uuid"`
+		Image      []byte `db:"image"`
+	}
+	var rows []existingIcon
+	if err := db.Select(&rows, "SELECT `jia_user_id`, `jia_isu_uuid`, `image` FROM `isu` WHERE `image` IS NOT NULL"); err != nil {
+		return err
+	}
+	wrote := 0
+	for _, row := range rows {
+		if len(row.Image) == 0 {
+			continue
+		}
+		if _, err := cacheIsuIcon(isuIconExistingDirName, row.JIAUserID, row.JIAIsuUUID, row.Image); err != nil {
+			return err
+		}
+		wrote++
+	}
+	if wrote == 0 {
+		return nil
+	}
+
+	readyPath := isuIconExistingReadyPath()
+	tmp, err := os.CreateTemp(filepath.Join(isuIconCacheDir, isuIconExistingDirName), ".ready-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, readyPath); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 type Config struct {
@@ -539,6 +624,10 @@ func main() {
 	}
 	db.SetMaxOpenConns(10)
 	defer db.Close()
+	if err := exportExistingIsuIcons(); err != nil {
+		e.Logger.Fatalf("failed to export existing isu icons: %v", err)
+		return
+	}
 
 	if err := initValkeyClient(); err != nil {
 		e.Logger.Fatalf("failed to connect valkey: %v", err)
@@ -664,8 +753,12 @@ func postInitialize(c echo.Context) error {
 	invalidateIsuMetaCache()
 	invalidateGraphCache()
 	invalidateCachedIcon()
-	if err := os.RemoveAll(isuIconCacheDir); err != nil {
+	if err := os.RemoveAll(filepath.Join(isuIconCacheDir, isuIconNewDirName)); err != nil {
 		c.Logger().Errorf("failed to clear icon cache: %v", err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	if err := exportExistingIsuIcons(); err != nil {
+		c.Logger().Errorf("failed to export existing isu icons: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -916,7 +1009,7 @@ func postIsu(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	// 配信の正は nginx が読むファイル。BLOB を MySQL に入れないので、行が見える前に書く。
-	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
+	if _, err := cacheIsuIcon(isuIconNewDirName, jiaUserID, jiaIsuUUID, image); err != nil {
 		removeCachedIsuIcon(jiaUserID, jiaIsuUUID)
 		c.Logger().Errorf("failed to cache icon: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1054,26 +1147,7 @@ func getIsuIcon(c echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	}
 
-	var image []byte
-	err = db.Get(&image, "SELECT `image` FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
-		jiaUserID, jiaIsuUUID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return c.String(http.StatusNotFound, "not found: isu")
-		}
-
-		c.Logger().Errorf("db error: %v", err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	if _, err := cacheIsuIcon(jiaUserID, jiaIsuUUID, image); err != nil {
-		c.Logger().Errorf("failed to cache icon: %v", err)
-		return c.Blob(http.StatusOK, "", image)
-	}
-	if serveCachedIsuIcon(c, jiaUserID, jiaIsuUUID) {
-		return c.NoContent(http.StatusOK)
-	}
-
-	return c.Blob(http.StatusOK, "", image)
+	return c.String(http.StatusNotFound, "not found: isu")
 }
 
 // GET /api/isu/:jia_isu_uuid/graph

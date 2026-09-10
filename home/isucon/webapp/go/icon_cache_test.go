@@ -3,7 +3,6 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -15,10 +14,11 @@ func TestCachedIconRememberAndInvalidate(t *testing.T) {
 
 	const user = "user-a"
 	const uuid = "11111111-1111-1111-1111-111111111111"
+	rel := isuIconRel(isuIconNewDirName, user, uuid)
 	if hasCachedIcon(user, uuid) {
 		t.Fatal("cache should start empty")
 	}
-	rememberCachedIcon(user, uuid)
+	rememberCachedIcon(user, uuid, rel)
 	if !hasCachedIcon(user, uuid) {
 		t.Fatal("rememberCachedIcon should store key")
 	}
@@ -37,7 +37,7 @@ func TestForgetCachedIcon(t *testing.T) {
 
 	const user = "user-a"
 	const uuid = "11111111-1111-1111-1111-111111111111"
-	rememberCachedIcon(user, uuid)
+	rememberCachedIcon(user, uuid, isuIconRel(isuIconNewDirName, user, uuid))
 	forgetCachedIcon(user, uuid)
 	if hasCachedIcon(user, uuid) {
 		t.Fatal("forgetCachedIcon should clear key")
@@ -59,15 +59,32 @@ func TestServeCachedIsuIconSkipsStatWhenRemembered(t *testing.T) {
 		t.Fatal("missing file and memory should miss")
 	}
 
-	rememberCachedIcon(user, uuid)
+	rel := isuIconRel(isuIconExistingDirName, user, uuid)
+	rememberCachedIcon(user, uuid, rel)
 	rec2 := httptest.NewRecorder()
 	c2 := e.NewContext(req, rec2)
 	if !serveCachedIsuIcon(c2, user, uuid) {
 		t.Fatal("remembered key should hit without Stat")
 	}
 	got := rec2.Header().Get("X-Accel-Redirect")
-	want := isuIconInternalPath + filepath.Base(isuIconCachePath(user, uuid))
+	want := isuIconInternalPath + rel
 	if got != want {
 		t.Fatalf("X-Accel-Redirect=%q want %q", got, want)
+	}
+}
+
+func TestIsuIconRelSeparatesDirs(t *testing.T) {
+	const user = "user-a"
+	const uuid = "11111111-1111-1111-1111-111111111111"
+	gotNew := isuIconRel(isuIconNewDirName, user, uuid)
+	gotExisting := isuIconRel(isuIconExistingDirName, user, uuid)
+	if gotNew == gotExisting {
+		t.Fatal("new and existing rel should differ")
+	}
+	if gotNew != isuIconNewDirName+"/"+isuIconFileName(user, uuid) {
+		t.Fatalf("new rel=%q", gotNew)
+	}
+	if gotExisting != isuIconExistingDirName+"/"+isuIconFileName(user, uuid) {
+		t.Fatalf("existing rel=%q", gotExisting)
 	}
 }
