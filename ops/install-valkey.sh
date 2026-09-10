@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Valkey を公式ソースから固定版で入れる。root で / 上の Git 作業ツリーから実行する。
-# バイナリを入れたホストでは systemd の enable/start も行う。bind はそのホストの私有 IP。
+# バイナリを入れたホストでは systemd の enable/start も行う。bind は設定ファイルの 0.0.0.0 のまま。
 set -euo pipefail
 
 VALKEY_VERSION="9.0.6"
@@ -62,13 +62,6 @@ install_config() {
     echo "設定ファイルがありません: ${VALKEY_CONF}" >&2
     exit 1
   fi
-  local priv
-  priv="$(hostname -I | awk '{print $1}')"
-  if [[ -z "${priv}" ]]; then
-    echo "私有 IP を取得できません" >&2
-    exit 1
-  fi
-  sed -i -E "s/^bind .*/bind 127.0.0.1 ${priv}/" "${VALKEY_CONF}"
   chown root:root "${VALKEY_CONF}"
   chmod 0644 "${VALKEY_CONF}"
 }

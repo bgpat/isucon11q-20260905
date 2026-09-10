@@ -50,14 +50,14 @@ Add deploy key and run `git push -u origin master`.
 | Host | Public IP | hostname | 役割 |
 | --- | --- | --- | --- |
 | isucon1 | 18.177.215.25 | ip-192-168-0-11 | アプリ / MariaDB / Valkey |
-| isucon2 | 3.113.46.84 | ip-192-168-0-12 | アプリ / MariaDB / Valkey |
-| isucon3 | 13.113.66.178 | ip-192-168-0-13 | アプリ / MariaDB / Valkey |
+| isucon2 | 3.113.46.84 | ip-192-168-0-12 | アプリ / MariaDB |
+| isucon3 | 13.113.66.178 | ip-192-168-0-13 | アプリ / MariaDB |
 | bench | 54.92.69.228 | ip-192-168-0-10 | ベンチマーカ / JIA mock |
 
 - SSH Host は `isucon1`〜`isucon3` と `bench`。競技サーバーの初回セットアップ時だけ `isucon`、初期化後は `root`。IdentityFile はリポジトリ外の `~/.ssh/id_ed25519`
 - 競技サーバー（isucon1〜3）の `/` が Git 作業ツリー。以後の変更はローカルで行い、サーバーでは `git pull` する
 - `bench` は競技アプリを動かさない。#371 で isucon3 と誤認して初期化したため、#379 でアプリと nginx-custom を止めた
-- Go 1.27.1（`make upgrade-go`）。Valkey 9.0.6（`make install-valkey`）。Valkey の起動と enable は isucon1〜3（各ホストの localhost）。bench では起動しない
+- Go 1.27.1（`make upgrade-go`）。Valkey 9.0.6（`make install-valkey`）。Valkey の起動と enable は isucon1 のみ
 - DB 初期データは Git に入れず、Release [db-initial-20260906-0343](https://github.com/bgpat/isucon11q-20260905/releases/tag/db-initial-20260906-0343) に保存済み（#9）。作り直し後もこの Release を使い、同じ初期データを再取得しない
 - 再セットアップ: #305 #362 #371 #377 #386 #389。役割修正: #379。接続設定: #19。ランタイム: #38。文書化: #341
 
@@ -68,6 +68,8 @@ make monitoring
 ```
 
 Access to 3999 port from your browser.
+
+Grafana OSS 13.2.1 と Tempo 2.6.1 も同じ `make monitoring` で nohup 起動する。systemd には入れないので、サーバー再起動後は自動では立ち上がらない。Tempo は全競技サーバーが同一クラスタ（distributor + ingester + querier + query-frontend）に参加する。memberlist と ingester アドレスは `/files/hosts/*`（各サーバーの hostname と IP）から `/ops/render-tempo-config.sh` が生成する。Grafana はどのサーバーで起動しても Explore の Tempo（ローカル `:3200`）から ring 全体の trace をまとめて見られる。アプリは `ENABLE_TRACING=1`（`/etc/isucondition-observability.env`）のとき OTLP（`OTEL_EXPORTER_OTLP_*`）でローカル distributor へ送る。提出用計測では `ENABLE_TRACING=0` にしてアプリを再起動する（#12）。
 
 ### edit config file
 
