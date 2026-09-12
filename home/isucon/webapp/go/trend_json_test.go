@@ -43,39 +43,69 @@ func TestEncodeTrendJSONMatchesPrettyJSONAndIndexesTimestamps(t *testing.T) {
 	}
 }
 
-func TestPatchTrendTimestampSameWidth(t *testing.T) {
+func TestApplyTrendLatestQueuesTimestampUntilRefresh(t *testing.T) {
 	invalidateTrendCache()
 	t.Cleanup(invalidateTrendCache)
 	res := []TrendResponse{{
 		Character: "cute",
-		Info:      []*TrendCondition{{ID: 7, Timestamp: 1622640527}},
-		Warning:   []*TrendCondition{},
-		Critical:  []*TrendCondition{},
+		Info: []*TrendCondition{
+			{ID: 7, Timestamp: 1622640527},
+			{ID: 8, Timestamp: 1622640500},
+		},
+		Warning:  []*TrendCondition{},
+		Critical: []*TrendCondition{},
 	}}
 	gen, _, _ := snapshotTrendCache()
 	storeTrendCache(gen, res)
+	rememberIsuMeta(isuMeta{ID: 7, JIAIsuUUID: "u7", Character: "cute"})
+	rememberIsuMeta(isuMeta{ID: 8, JIAIsuUUID: "u8", Character: "cute"})
 
-	meta := isuMeta{ID: 7, JIAIsuUUID: "u", Character: "cute"}
 	trendCache.Lock()
-	changed := upsertTrendLocked(meta, 1622640599, conditionLevelInfo)
-	ok := patchTrendTimestampLocked(7, 1622640599, conditionLevelInfo)
-	body := append([]byte(nil), trendCache.body...)
+	bodyBefore := trendCache.body
 	trendCache.Unlock()
-	if changed {
-		t.Fatal("同じ位置の timestamp 更新は structure 変更にしない")
+
+	applyTrendLatest("u7", conditionRecord{
+		Timestamp: time.Unix(1622640599, 0),
+		Condition: "is_dirty=false,is_overweight=false,is_broken=false",
+	})
+	applyTrendLatest("u8", conditionRecord{
+		Timestamp: time.Unix(1622640588, 0),
+		Condition: "is_dirty=false,is_overweight=false,is_broken=false",
+	})
+	if trendDirty.Load() {
+		t.Fatal("同じ位置の timestamp 更新は dirty にしない")
 	}
+	if _, ok := loadTrendJSONIfUsable(); ok {
+		t.Fatal("未反映の timestamp がある JSON を返してはいけない")
+	}
+	trendCache.Lock()
+	if len(trendCache.body) == 0 || &trendCache.body[0] != &bodyBefore[0] {
+		t.Fatal("pending のあいだは JSON 本体を作り直さない")
+	}
+	if bytes.Contains(trendCache.body, []byte("1622640599")) || bytes.Contains(trendCache.body, []byte("1622640588")) {
+		t.Fatalf("POST 時点で JSON が書き換わっている: %s", trendCache.body)
+	}
+	if len(trendCache.pendingTs) != 2 {
+		t.Fatalf("pending=%v", trendCache.pendingTs)
+	}
+	trendCache.Unlock()
+
+	body, ok := refreshTrendJSONFromMemory()
 	if !ok {
-		t.Fatal("同桁の timestamp を差し替えられなかった")
+		t.Fatal("GET 公開で timestamp をまとめて書けない")
 	}
-	if !bytes.Contains(body, []byte("1622640599")) {
+	if !bytes.Contains(body, []byte("1622640599")) || !bytes.Contains(body, []byte("1622640588")) {
 		t.Fatalf("差し替え後の JSON に新 timestamp が無い: %s", body)
 	}
-	if bytes.Contains(body, []byte("1622640527")) {
+	if bytes.Contains(body, []byte("1622640527")) || bytes.Contains(body, []byte("1622640500")) {
 		t.Fatalf("旧 timestamp が残っている: %s", body)
+	}
+	if _, ok := loadTrendJSONIfUsable(); !ok {
+		t.Fatal("公開後は JSON を返せる")
 	}
 }
 
-func TestApplyTrendLatestReordersJSONImmediately(t *testing.T) {
+func TestApplyTrendLatestReordersThenRefreshFromMemory(t *testing.T) {
 	invalidateTrendCache()
 	t.Cleanup(invalidateTrendCache)
 	res := []TrendResponse{{
@@ -95,12 +125,15 @@ func TestApplyTrendLatestReordersJSONImmediately(t *testing.T) {
 		Timestamp: time.Unix(1622641000, 0),
 		Condition: "is_dirty=false,is_overweight=false,is_broken=false",
 	})
-	if trendDirty.Load() {
-		t.Fatal("並び変更は即 encode し dirty にしない")
+	if !trendDirty.Load() {
+		t.Fatal("並びが変わる更新は dirty にする")
 	}
-	body, ok := loadTrendJSONIfUsable()
+	if _, ok := loadTrendJSONIfUsable(); ok {
+		t.Fatal("並び変更後の旧 JSON を返してはいけない")
+	}
+	body, ok := refreshTrendJSONFromMemory()
 	if !ok {
-		t.Fatal("並び変更直後の JSON を GET が使える")
+		t.Fatal("メモリから encode し直せる")
 	}
 	idx2 := bytes.Index(body, []byte(`"isu_id": 2`))
 	idx1 := bytes.Index(body, []byte(`"isu_id": 1`))
@@ -163,9 +196,9 @@ func TestApplyTrendLatestIgnoresOlderTimestampAcrossReorder(t *testing.T) {
 		Timestamp: time.Unix(1622641000, 0),
 		Condition: "is_dirty=false,is_overweight=false,is_broken=false",
 	})
-	body, ok := loadTrendJSONIfUsable()
+	body, ok := refreshTrendJSONFromMemory()
 	if !ok {
-		t.Fatal("並び変更後の JSON を GET が使える")
+		t.Fatal("並び変更後の JSON を公開できる")
 	}
 	if bytes.Contains(body, []byte("1622640400")) {
 		t.Fatalf("古い timestamp が encode されている:\n%s", body)
@@ -175,5 +208,38 @@ func TestApplyTrendLatestIgnoresOlderTimestampAcrossReorder(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte("1622641000")) {
 		t.Fatalf("id=1 の新 timestamp が無い:\n%s", body)
+	}
+}
+
+func TestApplyTrendLatestIgnoresOlderTimestampWhilePending(t *testing.T) {
+	invalidateTrendCache()
+	t.Cleanup(invalidateTrendCache)
+	res := []TrendResponse{{
+		Character: "cute",
+		Info:      []*TrendCondition{{ID: 7, Timestamp: 1622640527}},
+		Warning:   []*TrendCondition{},
+		Critical:  []*TrendCondition{},
+	}}
+	gen, _, _ := snapshotTrendCache()
+	storeTrendCache(gen, res)
+	rememberIsuMeta(isuMeta{ID: 7, JIAIsuUUID: "u7", Character: "cute"})
+
+	applyTrendLatest("u7", conditionRecord{
+		Timestamp: time.Unix(1622640599, 0),
+		Condition: "is_dirty=false,is_overweight=false,is_broken=false",
+	})
+	applyTrendLatest("u7", conditionRecord{
+		Timestamp: time.Unix(1622640580, 0),
+		Condition: "is_dirty=false,is_overweight=false,is_broken=false",
+	})
+	body, ok := refreshTrendJSONFromMemory()
+	if !ok {
+		t.Fatal("pending を公開できる")
+	}
+	if !bytes.Contains(body, []byte("1622640599")) {
+		t.Fatalf("新しい timestamp が無い: %s", body)
+	}
+	if bytes.Contains(body, []byte("1622640580")) {
+		t.Fatalf("pending 中の古い timestamp が勝っている: %s", body)
 	}
 }

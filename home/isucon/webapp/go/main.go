@@ -72,11 +72,12 @@ var (
 	postIsuConditionTargetBaseURL string // JIAへのactivate時に登録する，ISUがconditionを送る先のURL
 	trendCache                    struct {
 		sync.RWMutex
-		response []TrendResponse
-		body     []byte
-		locs     map[int]trendJSONLoc
-		valid    bool
-		gen      uint64
+		response  []TrendResponse
+		body      []byte
+		locs      map[int]trendJSONLoc
+		pendingTs map[int]int64
+		valid     bool
+		gen       uint64
 	}
 	sessionCache struct {
 		sync.Mutex
