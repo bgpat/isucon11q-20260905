@@ -3,15 +3,11 @@ package main
 import (
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
-const trendRecomputeMinInterval = 200 * time.Millisecond
-
 var (
-	trendComputeMu  sync.Mutex
-	trendDirty      atomic.Bool
-	trendComputedAt atomic.Int64
+	trendComputeMu sync.Mutex
+	trendDirty     atomic.Bool
 )
 
 func markTrendCacheDirty() {
@@ -20,7 +16,6 @@ func markTrendCacheDirty() {
 
 func noteTrendCacheRecomputed() {
 	trendDirty.Store(false)
-	trendComputedAt.Store(time.Now().UnixNano())
 }
 
 func loadTrendCache() ([]TrendResponse, bool) {
@@ -67,21 +62,10 @@ func invalidateTrendCache() {
 	trendCache.gen++
 	trendCache.Unlock()
 	trendDirty.Store(false)
-	trendComputedAt.Store(0)
 }
 
 func trendCacheUsableLocked() bool {
-	if !trendCache.valid || len(trendCache.body) == 0 {
-		return false
-	}
-	if !trendDirty.Load() {
-		return true
-	}
-	t := trendComputedAt.Load()
-	if t == 0 {
-		return false
-	}
-	return time.Now().UnixNano()-t < int64(trendRecomputeMinInterval)
+	return trendCache.valid && len(trendCache.body) > 0 && !trendDirty.Load()
 }
 
 func loadTrendCacheIfUsable() ([]TrendResponse, bool) {
