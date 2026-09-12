@@ -39,16 +39,6 @@
 !/etc/mysql/mariadb.conf.d/50-server.cnf
 # 運用スクリプト
 !/ops
-/ops/*
-!/ops/benchmark-report.py
-!/ops/benchmark_sql.py
-!/ops/test_benchmark_report.py
-!/ops/collect-valkey.sh
-!/ops/valkey_metrics.py
-!/ops/test_valkey_metrics.py
-!/ops/install-nginx-custom.sh
-!/ops/render-tempo-config.sh
-!/ops/benchmark.md
 # /home/isucon/.bashrc.backup
 /*
 !/home
@@ -102,7 +92,6 @@
 /etc/nginx-custom/sites-enabled/*
 !/etc/nginx-custom/sites-enabled/isucondition.conf
 
-# 上の /* で /ops が再度無視されるため、末尾で文書を解除する
+# 上の /* で /ops が再度無視されるため、末尾でディレクトリごと解除する
 !/ops
-/ops/*
-!/ops/benchmark.md
+!/ops/**
