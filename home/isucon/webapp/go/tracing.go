@@ -215,6 +215,14 @@ func traceLock(ctx context.Context, name string, mu *sync.Mutex) (context.Contex
 	}
 }
 
+func startSpan(ctx context.Context, name string) (context.Context, func()) {
+	if !tracingEnabled() {
+		return ctx, func() {}
+	}
+	ctx, span := otel.Tracer(tracerScopeIsucondition).Start(ctx, name)
+	return ctx, func() { span.End() }
+}
+
 func spanFromContext(ctx context.Context) trace.Span {
 	return trace.SpanFromContext(ctx)
 }
@@ -228,6 +236,12 @@ func setSpanBool(span trace.Span, key string, v bool) {
 func setSpanInt(span trace.Span, key string, v int) {
 	if span != nil && span.IsRecording() {
 		span.SetAttributes(attribute.Int(key, v))
+	}
+}
+
+func setSpanString(span trace.Span, key, v string) {
+	if span != nil && span.IsRecording() {
+		span.SetAttributes(attribute.String(key, v))
 	}
 }
 

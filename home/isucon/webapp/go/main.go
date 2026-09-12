@@ -667,12 +667,15 @@ func getSession(r *http.Request) (*sessions.Session, error) {
 }
 
 func getUserIDFromSession(c echo.Context) (string, int, error) {
+	span := spanFromContext(c.Request().Context())
 	cookieValue, hasCookie := sessionCookieValue(c.Request())
 	if hasCookie {
 		if jiaUserID, ok := getCachedSessionUserID(cookieValue); ok {
+			setSpanBool(span, "session.cache", true)
 			return jiaUserID, 0, nil
 		}
 	}
+	setSpanBool(span, "session.cache", false)
 
 	session, err := getSession(c.Request())
 	if err != nil {
@@ -878,7 +881,14 @@ func getMe(c echo.Context) error {
 // GET /api/isu
 // ISUの一覧を取得
 func getIsuList(c echo.Context) error {
+	req := c.Request()
+	parentCtx := req.Context()
+	parent := spanFromContext(parentCtx)
+
+	ctx, endSession := startSpan(parentCtx, "getIsuList.session")
+	c.SetRequest(req.WithContext(ctx))
 	jiaUserID, errStatusCode, err := getUserIDFromSession(c)
+	endSession()
 	if err != nil {
 		if errStatusCode == http.StatusUnauthorized {
 			return c.String(http.StatusUnauthorized, "you are not signed in")
@@ -888,7 +898,10 @@ func getIsuList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	metas, err := listIsuMetaByUser(jiaUserID)
+	ctx, endMeta := startSpan(parentCtx, "getIsuList.meta")
+	metas, err := listIsuMetaByUser(ctx, jiaUserID)
+	setSpanInt(parent, "isu.count", len(metas))
+	endMeta()
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -898,8 +911,15 @@ func getIsuList(c echo.Context) error {
 	for _, meta := range metas {
 		uuids = append(uuids, meta.JIAIsuUUID)
 	}
-	latestByUUID, err := getLatestConditionsFromValkey(c.Request().Context(), uuids)
+	ctx, endLatest := startSpan(parentCtx, "getIsuList.latest")
+	latestByUUID, err := getLatestConditionsFromValkey(ctx, uuids)
+	setSpanInt(parent, "isu.latest_hit", len(latestByUUID))
+	endLatest()
 	if err != nil {
+		recordSpanError(parent, err)
+		if errors.Is(err, context.Canceled) {
+			setSpanString(parent, "error.type", "context_canceled")
+		}
 		c.Logger().Errorf("valkey error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -934,7 +954,10 @@ func getIsuList(c echo.Context) error {
 		})
 	}
 
-	return writePrettyJSON(c, http.StatusOK, responseList, prettyIsuListCap(responseList), appendPrettyIsuList)
+	_, endEncode := startSpan(parentCtx, "getIsuList.encode")
+	err = writePrettyJSON(c, http.StatusOK, responseList, prettyIsuListCap(responseList), appendPrettyIsuList)
+	endEncode()
+	return err
 }
 
 type jiaActivateResult struct {
@@ -1101,7 +1124,14 @@ func postIsu(c echo.Context) error {
 // GET /api/isu/:jia_isu_uuid
 // ISUの情報を取得
 func getIsuID(c echo.Context) error {
+	req := c.Request()
+	parentCtx := req.Context()
+	parent := spanFromContext(parentCtx)
+
+	ctx, endSession := startSpan(parentCtx, "getIsuID.session")
+	c.SetRequest(req.WithContext(ctx))
 	jiaUserID, errStatusCode, err := getUserIDFromSession(c)
+	endSession()
 	if err != nil {
 		if errStatusCode == http.StatusUnauthorized {
 			return c.String(http.StatusUnauthorized, "you are not signed in")
@@ -1113,7 +1143,10 @@ func getIsuID(c echo.Context) error {
 
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
+	_, endMeta := startSpan(parentCtx, "getIsuID.meta")
 	meta, ok, err := ownedIsuMeta(jiaIsuUUID, jiaUserID)
+	setSpanBool(parent, "isu.found", ok)
+	endMeta()
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1122,12 +1155,15 @@ func getIsuID(c echo.Context) error {
 		return c.String(http.StatusNotFound, "not found: isu")
 	}
 
-	return writePrettyJSON(c, http.StatusOK, Isu{
+	_, endEncode := startSpan(parentCtx, "getIsuID.encode")
+	err = writePrettyJSON(c, http.StatusOK, Isu{
 		ID:         meta.ID,
 		JIAIsuUUID: meta.JIAIsuUUID,
 		Name:       meta.Name,
 		Character:  meta.Character,
 	}, 256, appendPrettyIsu)
+	endEncode()
+	return err
 }
 
 // GET /api/isu/:jia_isu_uuid/icon
