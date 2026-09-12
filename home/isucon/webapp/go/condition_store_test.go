@@ -241,6 +241,78 @@ func TestMergeScoredConditionsDesc(t *testing.T) {
 	}
 }
 
+func TestGroupConditionZAddMembersSameLevel(t *testing.T) {
+	recs := make([]conditionRecord, 10)
+	for i := range recs {
+		recs[i] = conditionRecord{
+			Timestamp: time.Unix(int64(i+1), 0),
+			Condition: packedConditionCSV[0],
+			Message:   "m",
+		}
+	}
+	groups, latest, err := groupConditionZAddMembers("u", recs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("groups=%d want 1", len(groups))
+	}
+	if groups[0].key != conditionZKeyForLevel("u", conditionLevelInfo) {
+		t.Fatalf("key=%q", groups[0].key)
+	}
+	if len(groups[0].members) != 10 {
+		t.Fatalf("members=%d want 10", len(groups[0].members))
+	}
+	if latest == nil || latest.Timestamp.Unix() != 10 {
+		t.Fatalf("latest=%v", latest)
+	}
+}
+
+func TestGroupConditionZAddMembersByLevel(t *testing.T) {
+	recs := []conditionRecord{
+		{Timestamp: time.Unix(1, 0), Condition: packedConditionCSV[0], Message: "i"},
+		{Timestamp: time.Unix(3, 0), Condition: packedConditionCSV[7], Message: "c"},
+		{Timestamp: time.Unix(2, 0), Condition: packedConditionCSV[0], Message: "i2"},
+		{Timestamp: time.Unix(4, 0), Condition: packedConditionCSV[1], Message: "w"},
+	}
+	groups, latest, err := groupConditionZAddMembers("u", recs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 3 {
+		t.Fatalf("groups=%d want 3", len(groups))
+	}
+	if groups[0].key != conditionZKeyForLevel("u", conditionLevelInfo) || len(groups[0].members) != 2 {
+		t.Fatalf("info group=%+v", groups[0])
+	}
+	if groups[1].key != conditionZKeyForLevel("u", conditionLevelCritical) || len(groups[1].members) != 1 {
+		t.Fatalf("critical group=%+v", groups[1])
+	}
+	if groups[2].key != conditionZKeyForLevel("u", conditionLevelWarning) || len(groups[2].members) != 1 {
+		t.Fatalf("warning group=%+v", groups[2])
+	}
+	if latest == nil || latest.Message != "w" {
+		t.Fatalf("latest=%v", latest)
+	}
+}
+
+func TestValkeyWritePipelineChunks(t *testing.T) {
+	members := valkeyZAddMembersMax + 1
+	zaddCmds := (members + valkeyZAddMembersMax - 1) / valkeyZAddMembersMax
+	if zaddCmds != 2 {
+		t.Fatalf("zadd cmds=%d want 2", zaddCmds)
+	}
+	cmdCount := zaddCmds + 1
+	rounds := (cmdCount + valkeyWritePipelineMax - 1) / valkeyWritePipelineMax
+	if rounds != 1 {
+		t.Fatalf("round trips=%d want 1 for %d cmds", rounds, cmdCount)
+	}
+	large := valkeyWritePipelineMax + 1
+	if got := (large + valkeyWritePipelineMax - 1) / valkeyWritePipelineMax; got != 2 {
+		t.Fatalf("round trips=%d want 2 for %d cmds", got, large)
+	}
+}
+
 func TestMergeScoredConditionsSameTimestamp(t *testing.T) {
 	ts := time.Unix(5, 0)
 	a := scoredCondition{member: "aaa", rec: conditionRecord{Timestamp: ts, Message: "a"}}
