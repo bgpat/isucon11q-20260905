@@ -86,6 +86,7 @@ git add -f *.go
 
 ### デプロイ・計測・後処理の所要時間
 
+収集対象とベンチ前後の手順は `ops/benchmark.md`。後処理の定型コマンドは次のとおり。
 保存済み baseline/candidate の後処理は使い捨てスクリプトを作らず、次の定型コマンドを使う。
 各入力は `bench.log`、`timing.json`（commit/load/end）、`slow.log.gz`、`cpu.pprof`、
 `prometheus-cpu.json`、`db-before.txt`、`db-after.txt`、
