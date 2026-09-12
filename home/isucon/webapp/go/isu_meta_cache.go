@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"sort"
@@ -107,10 +108,14 @@ func forgetIsuMeta(jiaIsuUUID string) {
 	}
 }
 
-func listIsuMetaByUser(jiaUserID string) ([]isuMeta, error) {
+func listIsuMetaByUser(ctx context.Context, jiaUserID string) ([]isuMeta, error) {
+	span := spanFromContext(ctx)
 	if metas, ok := isuMetas.list(jiaUserID); ok {
+		setSpanBool(span, "isu.meta_cache", true)
+		setSpanInt(span, "isu.count", len(metas))
 		return metas, nil
 	}
+	setSpanBool(span, "isu.meta_cache", false)
 	var rows []isuMeta
 	err := db.Select(&rows, "SELECT "+isuMetaSelectColumns+" FROM `isu` WHERE `jia_user_id` = ?", jiaUserID)
 	if err != nil {
@@ -118,6 +123,7 @@ func listIsuMetaByUser(jiaUserID string) ([]isuMeta, error) {
 	}
 	isuMetas.storeUser(jiaUserID, rows)
 	metas, _ := isuMetas.list(jiaUserID)
+	setSpanInt(span, "isu.count", len(metas))
 	return metas, nil
 }
 

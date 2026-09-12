@@ -310,7 +310,10 @@ func getLatestConditionFromValkey(ctx context.Context, jiaIsuUUID string) (*cond
 
 func getLatestConditionsFromValkey(ctx context.Context, uuids []string) (map[string]conditionRecord, error) {
 	out := make(map[string]conditionRecord, len(uuids))
+	span := spanFromContext(ctx)
+	setSpanInt(span, "valkey.key_count", len(uuids))
 	if len(uuids) == 0 {
+		setSpanInt(span, "isu.latest_hit", 0)
 		return out, nil
 	}
 	keys := make([]string, len(uuids))
@@ -320,6 +323,7 @@ func getLatestConditionsFromValkey(ctx context.Context, uuids []string) (map[str
 	cmd := valkeyClient.B().Mget().Key(keys...).Build()
 	arr, err := valkeyClient.Do(ctx, cmd).ToArray()
 	if err != nil {
+		recordSpanError(span, err)
 		return nil, err
 	}
 	for i, elem := range arr {
@@ -328,14 +332,17 @@ func getLatestConditionsFromValkey(ctx context.Context, uuids []string) (map[str
 			continue
 		}
 		if err != nil {
+			recordSpanError(span, err)
 			return nil, err
 		}
 		rec, err := decodeConditionLatest(raw)
 		if err != nil {
+			recordSpanError(span, err)
 			return nil, err
 		}
 		out[uuids[i]] = rec
 	}
+	setSpanInt(span, "isu.latest_hit", len(out))
 	return out, nil
 }
 
