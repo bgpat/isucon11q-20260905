@@ -21,6 +21,8 @@ const (
 	conditionListFetchMin    = 64
 	conditionMemberVer1      = 1
 	conditionMemberHdrLen    = 18
+	valkeyZAddMembersMax     = 32
+	valkeyWritePipelineMax   = 8
 	flagSitting              = 1 << 0
 	flagDirty                = 1 << 1
 	flagOverweight           = 1 << 2
@@ -175,32 +177,90 @@ func decodeConditionLatest(raw string) (conditionRecord, error) {
 	}, nil
 }
 
+type conditionZAddMember struct {
+	score  float64
+	member string
+}
+
+type conditionZAddGroup struct {
+	key     string
+	members []conditionZAddMember
+}
+
 func insertIsuConditionsToValkey(ctx context.Context, jiaIsuUUID string, records []conditionRecord) error {
 	if len(records) == 0 {
 		return nil
 	}
-	cmds := make(valkey.Commands, 0, len(records)+1)
+	groups, latest, err := groupConditionZAddMembers(jiaIsuUUID, records)
+	if err != nil {
+		return err
+	}
+	cmds := make(valkey.Commands, 0, len(groups)+1)
+	for _, g := range groups {
+		cmds = appendZAddCommands(cmds, g.key, g.members)
+	}
+	cmds = append(cmds, valkeyClient.B().Eval().Script(valkeyLatestUpdateLua).Numkeys(1).Key(conditionLatestKey(jiaIsuUUID)).Arg(strconv.FormatInt(latest.Timestamp.Unix(), 10)).Arg(encodeConditionLatest(*latest)).Build())
+	return doValkeyMultiChunked(ctx, cmds)
+}
+
+func groupConditionZAddMembers(jiaIsuUUID string, records []conditionRecord) ([]conditionZAddGroup, *conditionRecord, error) {
+	indexByKey := make(map[string]int, 3)
+	groups := make([]conditionZAddGroup, 0, 3)
 	var latest *conditionRecord
 	for i := range records {
 		rec := records[i]
 		member, err := encodeConditionMember(rec)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		level, err := calculateConditionLevel(rec.Condition)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
-		cmds = append(cmds, valkeyClient.B().Zadd().Key(conditionZKeyForLevel(jiaIsuUUID, level)).ScoreMember().ScoreMember(float64(rec.Timestamp.Unix()), member).Build())
+		zkey := conditionZKeyForLevel(jiaIsuUUID, level)
+		idx, ok := indexByKey[zkey]
+		if !ok {
+			idx = len(groups)
+			indexByKey[zkey] = idx
+			groups = append(groups, conditionZAddGroup{key: zkey})
+		}
+		groups[idx].members = append(groups[idx].members, conditionZAddMember{
+			score:  float64(rec.Timestamp.Unix()),
+			member: member,
+		})
 		if latest == nil || !rec.Timestamp.Before(latest.Timestamp) {
 			cp := rec
 			latest = &cp
 		}
 	}
-	cmds = append(cmds, valkeyClient.B().Eval().Script(valkeyLatestUpdateLua).Numkeys(1).Key(conditionLatestKey(jiaIsuUUID)).Arg(strconv.FormatInt(latest.Timestamp.Unix(), 10)).Arg(encodeConditionLatest(*latest)).Build())
-	for _, resp := range valkeyClient.DoMulti(ctx, cmds...) {
-		if err := resp.Error(); err != nil {
-			return err
+	return groups, latest, nil
+}
+
+func appendZAddCommands(cmds valkey.Commands, zkey string, members []conditionZAddMember) valkey.Commands {
+	for start := 0; start < len(members); start += valkeyZAddMembersMax {
+		end := start + valkeyZAddMembersMax
+		if end > len(members) {
+			end = len(members)
+		}
+		b := valkeyClient.B().Zadd().Key(zkey).ScoreMember()
+		for _, m := range members[start:end] {
+			b = b.ScoreMember(m.score, m.member)
+		}
+		cmds = append(cmds, b.Build())
+	}
+	return cmds
+}
+
+func doValkeyMultiChunked(ctx context.Context, cmds valkey.Commands) error {
+	for start := 0; start < len(cmds); start += valkeyWritePipelineMax {
+		end := start + valkeyWritePipelineMax
+		if end > len(cmds) {
+			end = len(cmds)
+		}
+		for _, resp := range valkeyClient.DoMulti(ctx, cmds[start:end]...) {
+			if err := resp.Error(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
