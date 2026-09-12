@@ -41,7 +41,7 @@ func tracingEnabled() bool {
 }
 
 func initTracing() (func(context.Context) error, error) {
-	if getEnv("ENABLE_TRACING", "1") == "0" {
+	if getEnv("ENABLE_TRACING", "0") != "1" {
 		tracingActive = false
 		return func(context.Context) error { return nil }, nil
 	}

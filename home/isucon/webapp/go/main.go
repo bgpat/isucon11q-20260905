@@ -489,7 +489,7 @@ func main() {
 		}))
 	}
 	e.Use(middleware.Recover())
-	if getEnv("ENABLE_PPROF", "1") == "1" {
+	if getEnv("ENABLE_PPROF", "0") == "1" {
 		e.GET("/debug/pprof/*", echo.WrapHandler(http.DefaultServeMux))
 	}
 	shutdownTracing, err := initTracing()
