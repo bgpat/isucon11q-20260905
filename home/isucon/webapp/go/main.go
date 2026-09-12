@@ -482,10 +482,12 @@ func main() {
 	dropConditionLogger = e.Logger
 	startDropConditionLogFlusher()
 
-	accessLogWriter = newDeferredLogWriter(os.Stdout)
-	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
-		Output: accessLogWriter,
-	}))
+	if getEnv("ENABLE_ACCESS_LOG", "0") == "1" {
+		accessLogWriter = newDeferredLogWriter(os.Stdout)
+		e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+			Output: accessLogWriter,
+		}))
+	}
 	e.Use(middleware.Recover())
 	if getEnv("ENABLE_PPROF", "0") == "1" {
 		e.GET("/debug/pprof/*", echo.WrapHandler(http.DefaultServeMux))
