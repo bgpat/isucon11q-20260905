@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -45,6 +46,7 @@ return 0
 var (
 	valkeyClient       valkey.Client
 	conditionUniqSeq   uint64
+	latestConditions   = latestConditionMem{m: make(map[string]conditionRecord)}
 	packedConditionCSV = [8]string{
 		0: "is_dirty=false,is_overweight=false,is_broken=false",
 		1: "is_dirty=true,is_overweight=false,is_broken=false",
@@ -62,6 +64,45 @@ type conditionRecord struct {
 	IsSitting bool
 	Condition string
 	Message   string
+}
+
+type latestConditionMem struct {
+	mu sync.RWMutex
+	m  map[string]conditionRecord
+}
+
+func (s *latestConditionMem) clear() {
+	s.mu.Lock()
+	s.m = make(map[string]conditionRecord)
+	s.mu.Unlock()
+}
+
+func (s *latestConditionMem) put(uuid string, rec conditionRecord) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur, ok := s.m[uuid]; ok && rec.Timestamp.Before(cur.Timestamp) {
+		return
+	}
+	s.m[uuid] = rec
+}
+
+func (s *latestConditionMem) get(uuid string) (conditionRecord, bool) {
+	s.mu.RLock()
+	rec, ok := s.m[uuid]
+	s.mu.RUnlock()
+	return rec, ok
+}
+
+func (s *latestConditionMem) getMany(uuids []string) map[string]conditionRecord {
+	out := make(map[string]conditionRecord, len(uuids))
+	s.mu.RLock()
+	for _, uuid := range uuids {
+		if rec, ok := s.m[uuid]; ok {
+			out[uuid] = rec
+		}
+	}
+	s.mu.RUnlock()
+	return out
 }
 
 func defaultValkeyAddr() string {
@@ -203,10 +244,12 @@ func insertIsuConditionsToValkey(ctx context.Context, jiaIsuUUID string, records
 			return err
 		}
 	}
+	latestConditions.put(jiaIsuUUID, *latest)
 	return nil
 }
 
 func clearConditionKeys(ctx context.Context) error {
+	latestConditions.clear()
 	var cursor uint64
 	for {
 		entry, err := valkeyClient.Do(ctx, valkeyClient.B().Scan().Cursor(cursor).Match(conditionKeyScanMatch).Count(500).Build()).AsScanEntry()
@@ -293,50 +336,17 @@ func loadIsuConditionsFromDBToValkey(ctx context.Context, q sqlx.Queryer) error 
 	return nil
 }
 
-func getLatestConditionFromValkey(ctx context.Context, jiaIsuUUID string) (*conditionRecord, error) {
-	raw, err := valkeyClient.Do(ctx, valkeyClient.B().Get().Key(conditionLatestKey(jiaIsuUUID)).Build()).ToString()
-	if valkey.IsValkeyNil(err) {
+func getLatestConditionFromValkey(_ context.Context, jiaIsuUUID string) (*conditionRecord, error) {
+	rec, ok := latestConditions.get(jiaIsuUUID)
+	if !ok {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	rec, err := decodeConditionLatest(raw)
-	if err != nil {
-		return nil, err
-	}
-	return &rec, nil
+	cp := rec
+	return &cp, nil
 }
 
-func getLatestConditionsFromValkey(ctx context.Context, uuids []string) (map[string]conditionRecord, error) {
-	out := make(map[string]conditionRecord, len(uuids))
-	if len(uuids) == 0 {
-		return out, nil
-	}
-	keys := make([]string, len(uuids))
-	for i, uuid := range uuids {
-		keys[i] = conditionLatestKey(uuid)
-	}
-	cmd := valkeyClient.B().Mget().Key(keys...).Build()
-	arr, err := valkeyClient.Do(ctx, cmd).ToArray()
-	if err != nil {
-		return nil, err
-	}
-	for i, elem := range arr {
-		raw, err := elem.ToString()
-		if valkey.IsValkeyNil(err) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		rec, err := decodeConditionLatest(raw)
-		if err != nil {
-			return nil, err
-		}
-		out[uuids[i]] = rec
-	}
-	return out, nil
+func getLatestConditionsFromValkey(_ context.Context, uuids []string) (map[string]conditionRecord, error) {
+	return latestConditions.getMany(uuids), nil
 }
 
 func conditionListFetchLimit(limit int) int {

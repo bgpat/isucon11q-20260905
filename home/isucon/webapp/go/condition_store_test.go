@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -252,5 +253,30 @@ func TestMergeScoredConditionsSameTimestamp(t *testing.T) {
 	asc := mergeScoredConditions([][]scoredCondition{{b}, {a}}, 0, zrangeBefore)
 	if len(asc) != 2 || asc[0].Message != "a" || asc[1].Message != "b" {
 		t.Fatalf("asc=%+v", asc)
+	}
+}
+
+func TestLatestConditionMemIgnoresOlderPut(t *testing.T) {
+	latestConditions.clear()
+	t.Cleanup(latestConditions.clear)
+	older := conditionRecord{Timestamp: time.Unix(1, 0), Message: "old"}
+	newer := conditionRecord{Timestamp: time.Unix(2, 0), Message: "new"}
+	latestConditions.put("u", older)
+	latestConditions.put("u", newer)
+	latestConditions.put("u", older)
+	got, err := getLatestConditionsFromValkey(context.Background(), []string{"u", "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got["u"].Message != "new" {
+		t.Fatalf("got=%+v", got)
+	}
+	rec, err := getLatestConditionFromValkey(context.Background(), "u")
+	if err != nil || rec == nil || rec.Message != "new" {
+		t.Fatalf("get=%v err=%v", rec, err)
+	}
+	missing, err := getLatestConditionFromValkey(context.Background(), "missing")
+	if err != nil || missing != nil {
+		t.Fatalf("missing=%v err=%v", missing, err)
 	}
 }
