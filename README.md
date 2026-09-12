@@ -56,10 +56,10 @@ Add deploy key and run `git push -u origin master`.
 
 - SSH Host は `isucon1`〜`isucon3` と `bench`。競技サーバーの初回セットアップ時だけ `isucon`、初期化後は `root`。IdentityFile はリポジトリ外の `~/.ssh/id_ed25519`
 - 競技サーバー（isucon1〜3）の `/` が Git 作業ツリー。以後の変更はローカルで行い、サーバーでは `git pull` する
-- `bench` は競技アプリを動かさない。#418 #420 の作り直し後は初期化していない（#371 で誤初期化、#379 で停止した経緯あり）
+- `bench` は競技アプリを動かさない。#418 #420 #423 #431 の作り直し後も初期化していない（#371 で誤初期化、#379 で停止した経緯あり）
 - Go 1.27.1（`make upgrade-go`）。Valkey 9.0.6（`make install-valkey`）。Valkey の起動と enable は isucon1〜3（#387）
 - DB 初期データは Git に入れず、Release [db-initial-20260906-0343](https://github.com/bgpat/isucon11q-20260905/releases/tag/db-initial-20260906-0343) に保存済み（#9）。作り直し後もこの Release を使い、同じ初期データを再取得しない
-- 再セットアップ: #305 #362 #371 #377 #386 #389 #398 #409 #418 #420。役割修正: #379。接続設定: #19。ランタイム: #38。文書化: #341
+- 再セットアップ: #305 #362 #371 #377 #386 #389 #398 #409 #418 #420 #423 #431。役割修正: #379。接続設定: #19。ランタイム: #38。文書化: #341
 
 ### run monitoring servers
 
