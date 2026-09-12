@@ -1,0 +1,21 @@
+[Unit]
+Description=Valkey latest (cond:latest) instance
+After=network.target
+Documentation=https://valkey.io/
+
+[Service]
+Type=simple
+User=valkey
+Group=valkey
+ExecStart=/usr/local/bin/valkey-server /etc/valkey/valkey-latest.conf
+ExecStop=/usr/local/bin/valkey-cli -h 127.0.0.1 -p 6380 shutdown save
+Restart=always
+RestartSec=1
+LimitNOFILE=65535
+RuntimeDirectory=valkey-latest
+RuntimeDirectoryMode=0755
+ReadWritePaths=/var/lib/valkey-latest
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

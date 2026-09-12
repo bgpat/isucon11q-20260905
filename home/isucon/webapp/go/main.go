@@ -634,6 +634,7 @@ func main() {
 		return
 	}
 	defer valkeyClient.Close()
+	defer valkeyLatestClient.Close()
 
 	postIsuConditionTargetBaseURL = os.Getenv("POST_ISUCONDITION_TARGET_BASE_URL")
 	if postIsuConditionTargetBaseURL == "" {

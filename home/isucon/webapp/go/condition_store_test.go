@@ -180,6 +180,29 @@ func TestDefaultValkeyAddrLocalhost(t *testing.T) {
 	}
 }
 
+func TestDefaultValkeyLatestAddrUsesEnv(t *testing.T) {
+	t.Setenv("VALKEY_LATEST_ADDR", "example:6381")
+	if got := defaultValkeyLatestAddr(); got != "example:6381" {
+		t.Fatalf("addr=%q", got)
+	}
+}
+
+func TestDefaultValkeyLatestAddrFollowsHost(t *testing.T) {
+	t.Setenv("VALKEY_LATEST_ADDR", "")
+	t.Setenv("VALKEY_ADDR", "192.168.0.11:6379")
+	if got := defaultValkeyLatestAddr(); got != "192.168.0.11:6380" {
+		t.Fatalf("addr=%q", got)
+	}
+}
+
+func TestDefaultValkeyLatestAddrLocalhost(t *testing.T) {
+	t.Setenv("VALKEY_LATEST_ADDR", "")
+	t.Setenv("VALKEY_ADDR", "")
+	if got := defaultValkeyLatestAddr(); got != "localhost:6380" {
+		t.Fatalf("addr=%q", got)
+	}
+}
+
 func TestConditionMembersAreUnique(t *testing.T) {
 	rec := conditionRecord{
 		Timestamp: time.Unix(1, 0),
