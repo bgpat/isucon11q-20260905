@@ -1,6 +1,6 @@
 [Unit]
 Description=isucondition.go
-After=network.target mysql.service valkey.service cloud-config.service
+After=network.target mysql.service valkey.service valkey-latest.service cloud-config.service
 
 [Service]
 WorkingDirectory=/home/isucon/webapp/go

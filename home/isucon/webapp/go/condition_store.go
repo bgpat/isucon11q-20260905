@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -17,6 +18,8 @@ const (
 	conditionZKeyPrefix      = "cond:z:"
 	conditionLatestKeyPrefix = "cond:latest:"
 	conditionKeyScanMatch    = "cond:*"
+	conditionLatestScanMatch = "cond:latest:*"
+	valkeyLatestPort         = "6380"
 	conditionListFetchFactor = 8
 	conditionListFetchMin    = 64
 	conditionMemberVer1      = 1
@@ -44,6 +47,7 @@ return 0
 
 var (
 	valkeyClient       valkey.Client
+	valkeyLatestClient valkey.Client
 	conditionUniqSeq   uint64
 	packedConditionCSV = [8]string{
 		0: "is_dirty=false,is_overweight=false,is_broken=false",
@@ -71,15 +75,40 @@ func defaultValkeyAddr() string {
 	return "localhost:6379"
 }
 
-func initValkeyClient() error {
+func defaultValkeyLatestAddr() string {
+	if addr := os.Getenv("VALKEY_LATEST_ADDR"); addr != "" {
+		return addr
+	}
+	host, _, err := net.SplitHostPort(defaultValkeyAddr())
+	if err != nil {
+		return "localhost:" + valkeyLatestPort
+	}
+	return net.JoinHostPort(host, valkeyLatestPort)
+}
+
+func newValkeyClient(addr string) (valkey.Client, error) {
 	client, err := valkey.NewClient(valkey.ClientOption{
-		InitAddress:  []string{defaultValkeyAddr()},
+		InitAddress:  []string{addr},
 		DisableCache: true,
 	})
 	if err != nil {
+		return nil, err
+	}
+	return wrapValkeyClient(client), nil
+}
+
+func initValkeyClient() error {
+	client, err := newValkeyClient(defaultValkeyAddr())
+	if err != nil {
 		return err
 	}
-	valkeyClient = wrapValkeyClient(client)
+	latest, err := newValkeyClient(defaultValkeyLatestAddr())
+	if err != nil {
+		client.Close()
+		return err
+	}
+	valkeyClient = client
+	valkeyLatestClient = latest
 	return nil
 }
 
@@ -179,7 +208,7 @@ func insertIsuConditionsToValkey(ctx context.Context, jiaIsuUUID string, records
 	if len(records) == 0 {
 		return nil
 	}
-	cmds := make(valkey.Commands, 0, len(records)+1)
+	cmds := make(valkey.Commands, 0, len(records))
 	var latest *conditionRecord
 	for i := range records {
 		rec := records[i]
@@ -197,28 +226,34 @@ func insertIsuConditionsToValkey(ctx context.Context, jiaIsuUUID string, records
 			latest = &cp
 		}
 	}
-	cmds = append(cmds, valkeyClient.B().Eval().Script(valkeyLatestUpdateLua).Numkeys(1).Key(conditionLatestKey(jiaIsuUUID)).Arg(strconv.FormatInt(latest.Timestamp.Unix(), 10)).Arg(encodeConditionLatest(*latest)).Build())
 	for _, resp := range valkeyClient.DoMulti(ctx, cmds...) {
 		if err := resp.Error(); err != nil {
 			return err
 		}
 	}
-	return nil
+	return valkeyLatestClient.Do(ctx, valkeyLatestClient.B().Eval().Script(valkeyLatestUpdateLua).Numkeys(1).Key(conditionLatestKey(jiaIsuUUID)).Arg(strconv.FormatInt(latest.Timestamp.Unix(), 10)).Arg(encodeConditionLatest(*latest)).Build()).Error()
 }
 
 func clearConditionKeys(ctx context.Context) error {
+	if err := clearMatchingKeys(ctx, valkeyClient, conditionKeyScanMatch); err != nil {
+		return err
+	}
+	return clearMatchingKeys(ctx, valkeyLatestClient, conditionLatestScanMatch)
+}
+
+func clearMatchingKeys(ctx context.Context, client valkey.Client, match string) error {
 	var cursor uint64
 	for {
-		entry, err := valkeyClient.Do(ctx, valkeyClient.B().Scan().Cursor(cursor).Match(conditionKeyScanMatch).Count(500).Build()).AsScanEntry()
+		entry, err := client.Do(ctx, client.B().Scan().Cursor(cursor).Match(match).Count(500).Build()).AsScanEntry()
 		if err != nil {
 			return err
 		}
 		if len(entry.Elements) > 0 {
 			del := make(valkey.Commands, 0, len(entry.Elements))
 			for _, key := range entry.Elements {
-				del = append(del, valkeyClient.B().Del().Key(key).Build())
+				del = append(del, client.B().Del().Key(key).Build())
 			}
-			for _, resp := range valkeyClient.DoMulti(ctx, del...) {
+			for _, resp := range client.DoMulti(ctx, del...) {
 				if err := resp.Error(); err != nil {
 					return err
 				}
@@ -294,7 +329,7 @@ func loadIsuConditionsFromDBToValkey(ctx context.Context, q sqlx.Queryer) error 
 }
 
 func getLatestConditionFromValkey(ctx context.Context, jiaIsuUUID string) (*conditionRecord, error) {
-	raw, err := valkeyClient.Do(ctx, valkeyClient.B().Get().Key(conditionLatestKey(jiaIsuUUID)).Build()).ToString()
+	raw, err := valkeyLatestClient.Do(ctx, valkeyLatestClient.B().Get().Key(conditionLatestKey(jiaIsuUUID)).Build()).ToString()
 	if valkey.IsValkeyNil(err) {
 		return nil, nil
 	}
@@ -317,8 +352,8 @@ func getLatestConditionsFromValkey(ctx context.Context, uuids []string) (map[str
 	for i, uuid := range uuids {
 		keys[i] = conditionLatestKey(uuid)
 	}
-	cmd := valkeyClient.B().Mget().Key(keys...).Build()
-	arr, err := valkeyClient.Do(ctx, cmd).ToArray()
+	cmd := valkeyLatestClient.B().Mget().Key(keys...).Build()
+	arr, err := valkeyLatestClient.Do(ctx, cmd).ToArray()
 	if err != nil {
 		return nil, err
 	}

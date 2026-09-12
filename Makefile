@@ -145,6 +145,13 @@ deploy-app:
 		systemctl enable valkey.service; \
 		systemctl restart valkey.service; \
 		systemctl is-active --quiet valkey.service; \
+		if [ -f /etc/systemd/system/valkey-latest.service ]; then \
+			mkdir -p /var/lib/valkey-latest; \
+			chown valkey:valkey /var/lib/valkey-latest; \
+			systemctl enable valkey-latest.service; \
+			systemctl restart valkey-latest.service; \
+			systemctl is-active --quiet valkey-latest.service; \
+		fi; \
 	fi
 	systemctl restart isucondition.go.service
 	systemctl is-active --quiet isucondition.go.service

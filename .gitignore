@@ -100,3 +100,23 @@
 !/etc/nginx-custom/sites-enabled
 /etc/nginx-custom/sites-enabled/*
 !/etc/nginx-custom/sites-enabled/isucondition.conf
+
+# latest 専用 Valkey（#437）
+/*
+!/etc
+/etc/*
+!/etc/valkey
+/etc/valkey/*
+!/etc/valkey/valkey.conf
+!/etc/valkey/valkey-latest.conf
+!/etc/systemd
+/etc/systemd/*
+!/etc/systemd/system
+/etc/systemd/system/*
+!/etc/systemd/system/valkey.service
+!/etc/systemd/system/valkey-latest.service
+!/etc/systemd/system/isucondition.go.service
+!/ops
+/ops/*
+!/ops/install-valkey.sh
+!/ops/collect-valkey.sh

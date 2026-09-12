@@ -9,7 +9,9 @@ VALKEY_SHA256="38f1e83faf382637d6e49503903187acb3ceed624e96d7b1d32b8d3d52768414"
 VALKEY_URL="https://github.com/valkey-io/valkey/archive/refs/tags/${VALKEY_VERSION}.tar.gz"
 VALKEY_PREFIX="/usr/local"
 VALKEY_CONF="/etc/valkey/valkey.conf"
+VALKEY_LATEST_CONF="/etc/valkey/valkey-latest.conf"
 VALKEY_DATA="/var/lib/valkey"
+VALKEY_LATEST_DATA="/var/lib/valkey-latest"
 VALKEY_USER="valkey"
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -26,8 +28,8 @@ ensure_user() {
   if ! id -u "${VALKEY_USER}" >/dev/null 2>&1; then
     useradd --system --home "${VALKEY_DATA}" --shell /usr/sbin/nologin "${VALKEY_USER}"
   fi
-  mkdir -p "${VALKEY_DATA}"
-  chown "${VALKEY_USER}:${VALKEY_USER}" "${VALKEY_DATA}"
+  mkdir -p "${VALKEY_DATA}" "${VALKEY_LATEST_DATA}"
+  chown "${VALKEY_USER}:${VALKEY_USER}" "${VALKEY_DATA}" "${VALKEY_LATEST_DATA}"
 }
 
 install_binary() {
@@ -62,8 +64,12 @@ install_config() {
     echo "設定ファイルがありません: ${VALKEY_CONF}" >&2
     exit 1
   fi
-  chown root:root "${VALKEY_CONF}"
-  chmod 0644 "${VALKEY_CONF}"
+  if [[ ! -f "${VALKEY_LATEST_CONF}" ]]; then
+    echo "設定ファイルがありません: ${VALKEY_LATEST_CONF}" >&2
+    exit 1
+  fi
+  chown root:root "${VALKEY_CONF}" "${VALKEY_LATEST_CONF}"
+  chmod 0644 "${VALKEY_CONF}" "${VALKEY_LATEST_CONF}"
 }
 
 install_unit() {
@@ -75,22 +81,29 @@ install_unit() {
     echo "unit がありません: /etc/systemd/system/valkey.service" >&2
     exit 1
   fi
+  if [[ ! -f /etc/systemd/system/valkey-latest.service ]]; then
+    echo "unit がありません: /etc/systemd/system/valkey-latest.service" >&2
+    exit 1
+  fi
   systemctl daemon-reload
 }
 
 configure_service() {
-  systemctl enable valkey.service
-  systemctl restart valkey.service
+  systemctl enable valkey.service valkey-latest.service
+  systemctl restart valkey.service valkey-latest.service
   local i
   for i in 1 2 3 4 5 6 7 8 9 10; do
-    if "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -qx PONG; then
+    if "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -qx PONG \
+      && "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6380 ping 2>/dev/null | grep -qx PONG; then
       break
     fi
     sleep 0.5
   done
   systemctl is-active --quiet valkey.service
+  systemctl is-active --quiet valkey-latest.service
   "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6379 ping | grep -qx PONG
-  echo "Valkey を起動しました ($(hostname -s)): $("${VALKEY_PREFIX}/bin/valkey-server" --version)"
+  "${VALKEY_PREFIX}/bin/valkey-cli" -h 127.0.0.1 -p 6380 ping | grep -qx PONG
+  echo "Valkey を起動しました ($(hostname -s)): $("${VALKEY_PREFIX}/bin/valkey-server" --version) 6379+6380"
 }
 
 install_build_deps
